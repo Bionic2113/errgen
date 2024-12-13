@@ -1,0 +1,27 @@
+package example
+
+import (
+	"errors"
+)
+
+type User struct {
+	Name string
+	Age  int
+}
+
+func (u *User) UpdateName(newName string) error {
+	if newName == "" {
+		return errors.New("name cannot be empty")
+	}
+	u.Name = newName
+
+	return nil
+}
+
+func ProcessUser(user *User, count int) error {
+	if err := user.UpdateName("New"); err != nil {
+		return err
+	}
+
+	return errors.New("processing failed")
+}
