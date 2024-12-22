@@ -17,7 +17,7 @@ func (u *User) UpdateName(newName string) error {
 
 func ProcessUser(user *User, count int) error {
 	if err := user.UpdateName("New"); err != nil {
-		return NewProcessUserError(user, count, "user.UpdateName", err)
+		return NewProcessUserError(user, count, "err", nil)
 	}
 
 	return NewProcessUserError(user, count, "processing failed", nil)

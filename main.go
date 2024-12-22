@@ -183,7 +183,7 @@ func writeModifiedFile(node *dst.File, path string) {
 		fmt.Printf("Error formatting modified file: %v\n", err)
 	}
 
-	if err := os.WriteFile(path, buf.Bytes(), 0644); err != nil {
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
 		fmt.Printf("Error writing modified file: %v\n", err)
 	}
 }
@@ -237,6 +237,8 @@ func extractArgs(funcDecl *dst.FuncDecl) []ArgInfo {
 	for _, field := range funcDecl.Type.Params.List {
 		typeStr := ""
 		switch t := field.Type.(type) {
+		default:
+			typeStr = "any"
 		case *dst.Ident:
 			typeStr = t.Name
 		case *dst.StarExpr:
@@ -260,12 +262,9 @@ func extractArgs(funcDecl *dst.FuncDecl) []ArgInfo {
 				typeStr = ident.Name + "." + t.Sel.Name
 			}
 		case *dst.InterfaceType:
-			typeStr = "interface{}"
+			typeStr = "any"
 		}
 
-		if typeStr == "" {
-			continue
-		}
 		for _, name := range field.Names {
 			args = append(args, ArgInfo{Name: name.Name, Type: typeStr})
 		}
@@ -289,7 +288,7 @@ func generateErrorFile(pkgName string, functions []FunctionInfo, pkgPath string)
 
 			case arg.Type == "bool":
 				imports["strconv"] = "strconv"
-			case arg.Type == "interface{}" || strings.Contains(arg.Type, "[]"):
+			case arg.Type == "any" || strings.Contains(arg.Type, "[]"):
 				imports["fmt"] = "fmt"
 			case !isBasicType(arg.Type):
 				imports["fmt"] = "fmt"
@@ -406,7 +405,7 @@ func (e *{{.FunctionName}}Error) Is(err error) bool {
 }
 
 func isBasicType(typeName string) bool {
-	basicTypes := map[string]bool{"string": true, "int": true, "int64": true, "uint64": true, "float64": true, "bool": true, "interface{}": true}
+	basicTypes := map[string]bool{"string": true, "int": true, "int64": true, "uint64": true, "float64": true, "bool": true, "any": true}
 	return basicTypes[strings.TrimPrefix(typeName, "*")]
 }
 
@@ -444,20 +443,20 @@ func modifyFunctionBody(funcDecl *dst.FuncDecl, info FunctionInfo) {
 			return true
 		}
 
-		if isErrorWrapper(result) {
-			return true
-		}
+		// if isErrorWrapper(result) {
+		// 	return true
+		// }
 
 		// Определяем сообщение об ошибке и нужно ли использовать nil
 		var reason string
 		var useNilError bool
 
-		// Сначала проверяем, не является ли ошибка результатом вызова функции
-		if msg, ok, useNil := findLastFunctionCall(returnStmt, parentMap); ok {
+		// Проверяем не создается ли ошибка напрямую
+		if msg, ok, useNil := extractErrorMessage(result); ok {
 			reason = msg
 			useNilError = useNil
-		} else if msg, ok, useNil := extractErrorMessage(result); ok {
-			// Если нет, проверяем не создается ли ошибка напрямую
+			// Проверяем, не является ли ошибка результатом вызова функции
+		} else if msg, ok, useNil := findLastFunctionCall(returnStmt, parentMap); ok {
 			reason = msg
 			useNilError = useNil
 		} else {
@@ -610,6 +609,12 @@ func extractErrorMessage(expr dst.Expr) (string, bool, bool) {
 			}
 			return sel.Sel.Name, true, false
 		} else if ident, ok := v.Fun.(*dst.Ident); ok {
+			// Если уже была обертка, то забираем причину
+			if strings.HasSuffix(ident.Name, "Error") && len(v.Args) > 1 {
+				if lit, ok := v.Args[len(v.Args)-2].(*dst.BasicLit); ok {
+					return strings.Trim(lit.Value, `"`), true, true
+				}
+			}
 			return ident.Name, true, false
 		}
 	case *dst.Ident:

@@ -33,11 +33,11 @@ func ProcessUser(user *User, count int) error {
 // Some comment
 func (u *User) IsOlder(user *User, count int) (bool, error) {
 	if user == nil {
-		return false, NewIsOlderError(user, count, "user is nil", nil)
+		return false, errors.New("user is nil")
 	}
 	// Third comment 
 	if u == nil {
-		return false, NewIsOlderError(user, count, "current user is nil", nil)
+		return false, errors.New("current user is nil")
 	}
 	if u.Age > user.Age {
 		return true, nil
