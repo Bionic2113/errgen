@@ -19,6 +19,7 @@ func NewUpdateNameError(newName string, reason string, err error) *UpdateNameErr
 		err: err,
 	}
 }
+
 func (e *UpdateNameError) Error() string {
 	return "[" +
 		"example/" +
@@ -36,9 +37,14 @@ func (e *UpdateNameError) Error() string {
 		"\n" +
 		e.err.Error()
 }
-func (e *UpdateNameError) Unwrap() error {
 
+func (e *UpdateNameError) Unwrap() error {
 	return e.err
+}
+
+func (e *UpdateNameError) Is(err error) bool {
+	_, ok := err.(*UpdateNameError)
+	return ok
 }
 
 type ProcessUserError struct {
@@ -57,6 +63,7 @@ func NewProcessUserError(user *User, count int, reason string, err error) *Proce
 		err: err,
 	}
 }
+
 func (e *ProcessUserError) Error() string {
 	return "[" +
 		"example/" +
@@ -75,9 +82,14 @@ func (e *ProcessUserError) Error() string {
 		"\n" +
 		e.err.Error()
 }
-func (e *ProcessUserError) Unwrap() error {
 
+func (e *ProcessUserError) Unwrap() error {
 	return e.err
+}
+
+func (e *ProcessUserError) Is(err error) bool {
+	_, ok := err.(*ProcessUserError)
+	return ok
 }
 
 type IsOlderError struct {
@@ -96,6 +108,7 @@ func NewIsOlderError(user *User, count int, reason string, err error) *IsOlderEr
 		err: err,
 	}
 }
+
 func (e *IsOlderError) Error() string {
 	return "[" +
 		"example/" +
@@ -114,9 +127,14 @@ func (e *IsOlderError) Error() string {
 		"\n" +
 		e.err.Error()
 }
-func (e *IsOlderError) Unwrap() error {
 
+func (e *IsOlderError) Unwrap() error {
 	return e.err
+}
+
+func (e *IsOlderError) Is(err error) bool {
+	_, ok := err.(*IsOlderError)
+	return ok
 }
 
 type IsYoungerError struct {
@@ -135,6 +153,7 @@ func NewIsYoungerError(user *User, count int, reason string, err error) *IsYoung
 		err: err,
 	}
 }
+
 func (e *IsYoungerError) Error() string {
 	return "[" +
 		"example/" +
@@ -153,9 +172,14 @@ func (e *IsYoungerError) Error() string {
 		"\n" +
 		e.err.Error()
 }
-func (e *IsYoungerError) Unwrap() error {
 
+func (e *IsYoungerError) Unwrap() error {
 	return e.err
+}
+
+func (e *IsYoungerError) Is(err error) bool {
+	_, ok := err.(*IsYoungerError)
+	return ok
 }
 
 type IsYoungerOrOlderError struct {
@@ -174,6 +198,7 @@ func NewIsYoungerOrOlderError(user *User, count int, reason string, err error) *
 		err: err,
 	}
 }
+
 func (e *IsYoungerOrOlderError) Error() string {
 	return "[" +
 		"example/" +
@@ -192,7 +217,12 @@ func (e *IsYoungerOrOlderError) Error() string {
 		"\n" +
 		e.err.Error()
 }
-func (e *IsYoungerOrOlderError) Unwrap() error {
 
+func (e *IsYoungerOrOlderError) Unwrap() error {
 	return e.err
+}
+
+func (e *IsYoungerOrOlderError) Is(err error) bool {
+	_, ok := err.(*IsYoungerOrOlderError)
+	return ok
 }
