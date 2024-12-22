@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"go/ast"
 	"go/parser"
 	"go/printer"
 	"go/token"
@@ -12,112 +11,41 @@ import (
 	"sort"
 	"strings"
 	"text/template"
+
+	"github.com/dave/dst"
+	"github.com/dave/dst/decorator"
 )
-	// FunctionInfo содержит метаданные о функции, которая возвращает ошибку
-	// Имя пакета
-	// Имя подпакета (если есть)
-	// Имя функции
-	// Тип получателя (для методов)
 
-	// Аргументы функции
-	// Импорты, необходимые для функции
-	// Флаг наличия возвращаемой ошибки
-	// ArgInfo содержит информацию об аргументе функции
-	// Имя аргумента
-	// Тип аргумента
-
-	// ErrorTemplate используется для генерации файла с ошибками
-	// Имя пакета
-	// Список функций с ошибками
-	// FileProcessor обрабатывает файлы Go и генерирует обертки для ошибок
-	// newFileProcessor создает новый процессор файлов
-	// processFiles обходит все файлы и обрабатывает их
-
-	// Пропускаем директории, тесты и файлы с ошибками
-	// processFile обрабатывает отдельный файл
-	// generateErrorFiles генерирует файлы с обертками ошибок для каждого пакета
-	// getSubPackageName возвращает имя подпакета относительно базовой директории
-	// analyzeFunctions анализирует функции в файле и модифицирует их для использования оберток ошибок
-	// Читаем оригинальный файл для сохранения форматирования
-	// Собираем информацию о пустых строках
-
-	// Анализируем функции
-	// Записываем модифицированный файл
-	// collectImports собирает информацию об импортах из файла
-	// analyzeEmptyLines анализирует пустые строки в файле
-	// createFunctionInfo создает информацию о функции
-	// extractReceiverType извлекает тип получателя метода
-
-	// writeModifiedFile записывает модифицированный файл с сохранением форматирования
-	// Восстанавливаем форматирование
-	// Skip if type couldn't be determined
-	// Collect required imports
-
-	// Analyze argument types to determine required imports
-	// For structs and any
-	// Handle types from other packages
-
-	// Form imports list
-	// Create structure with data for template, including imports
-	// Форматируем сгенерированный код
-	// Создаем конфигурацию для форматирования
-	// Парсим сгенерированный код
-	// Форматируем код
-	// Записываем отформатированный код
-
-	// isBasicType checks if the type is a basic Go type that doesn't need fmt
-	// modifyFunctionBody analyzes and modifies function bodies to wrap error returns
-	// Создаем карту отношений узлов AST
-	// Получаем индекс параметра error
-	// Пропускаем, если это уже обернутая ошибка
-	// Определяем сообщение об ошибке и нужно ли использовать nil
-	// Создаем конструктор ля обертки ошибки
-
-	// isNilError checks if the expression is nil
-	// getArgumentNames returns a list of function argument expressions
-	// isErrorWrapper checks if the expression is already a wrapped error
-	// Создаем мапу всех импортов
-	// Проверяем использование каждого имп��рта
-	// Находим соответствующий имп��рт
-	// Импорт используется, удаляем из мапы
-
-	// Проверяем использование в вызовах функций
-	// Удаляем неиспользуемые импорты из декларации
-	// Если все импорты удалены, помечаем декларацию для удаления
-	// Удаляем пустые декларации импортов
-	// extractErrorMessage извлекает сообщение об ошибке из выражения и определяет, нужно ли использовать nil для err
-	// Проверяем вызовы функций (errors.New, fmt.Errorf, fmt.Error и т.д.)
-	// Для errors.New и fmt.Error/Errorf используем сообщение как reason и nil как err
-
-	// Для форматированных строк преобразуем в текст
-	// findLastFunctionCall ищет последний вызо�� функции перед return в родительских узлах
 type FunctionInfo struct {
 	PackageName    string
 	SubPackageName string
 	FunctionName   string
 	ReceiverType   string
 	Args           []ArgInfo
-	Imports  map[string]string
+	Imports        map[string]string
 
 	HasError bool
 }
+
 type ArgInfo struct {
 	Name string
 	Type string
 }
+
 type ErrorTemplate struct {
 	Package   string
 	Functions []FunctionInfo
 }
+
 type FileProcessor struct {
-	currentDir   string
 	packages     map[string][]FunctionInfo
 	packagePaths map[string]string
+	currentDir   string
 }
+
 func main() {
 	processor, err := newFileProcessor()
 	if err != nil {
-
 		panic(err)
 	}
 	if err := processor.processFiles(); err != nil {
@@ -133,6 +61,7 @@ func newFileProcessor() (*FileProcessor, error) {
 	}
 	return &FileProcessor{currentDir: currentDir, packages: make(map[string][]FunctionInfo), packagePaths: make(map[string]string)}, nil
 }
+
 func (p *FileProcessor) processFiles() error {
 	return filepath.Walk(p.currentDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -140,21 +69,21 @@ func (p *FileProcessor) processFiles() error {
 		}
 
 		// Пропускаем директории, тесты, файлы с ошибками и main.go
-		if info.IsDir() || 
-		   !strings.HasSuffix(path, ".go") || 
-		   strings.HasSuffix(path, "_test.go") || 
-		   strings.HasSuffix(path, "errors.go") ||
-		   strings.HasSuffix(path, "main.go") {
+		if info.IsDir() ||
+			!strings.HasSuffix(path, ".go") ||
+			strings.HasSuffix(path, "_test.go") ||
+			strings.HasSuffix(path, "errors.go") ||
+			strings.HasSuffix(path, "main.go") {
 			return nil
 		}
 
 		return p.processFile(path)
 	})
 }
+
 func (p *FileProcessor) processFile(path string) error {
 	fset := token.NewFileSet()
-	node, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
-
+	node, err := decorator.ParseFile(fset, path, nil, parser.ParseComments)
 	if err != nil {
 		return err
 	}
@@ -169,8 +98,8 @@ func (p *FileProcessor) processFile(path string) error {
 		p.packagePaths[pkgName] = pkgDir
 	}
 	return nil
-
 }
+
 func (p *FileProcessor) generateErrorFiles() {
 	for pkg, functions := range p.packages {
 		generateErrorFile(pkg, functions, p.packagePaths[pkg])
@@ -188,17 +117,13 @@ func getSubPackageName(pkgDir, baseDir string) string {
 	return rel
 }
 
-func analyzeFunctions(node *ast.File, pkgName, subPkg string, currentDir string, fileName string) []FunctionInfo {
+func analyzeFunctions(node *dst.File, pkgName, subPkg string, currentDir string, fileName string) []FunctionInfo {
 	var functions []FunctionInfo
 	imports := collectImports(node)
 	originalPath := filepath.Join(currentDir, subPkg, fileName)
-	originalContent, err := os.ReadFile(originalPath)
-	if err != nil {
-		return nil
-	}
-	emptyLineRuns := analyzeEmptyLines(string(originalContent))
-	ast.Inspect(node, func(n ast.Node) bool {
-		if funcDecl, ok := n.(*ast.FuncDecl); ok && hasErrorReturn(funcDecl) {
+
+	dst.Inspect(node, func(n dst.Node) bool {
+		if funcDecl, ok := n.(*dst.FuncDecl); ok && hasErrorReturn(funcDecl) {
 			f := createFunctionInfo(funcDecl, pkgName, subPkg, imports)
 			functions = append(functions, f)
 			modifyFunctionBody(funcDecl, f)
@@ -207,11 +132,12 @@ func analyzeFunctions(node *ast.File, pkgName, subPkg string, currentDir string,
 		return true
 	})
 	if len(functions) > 0 {
-		writeModifiedFile(node, originalPath, emptyLineRuns)
+		writeModifiedFile(node, originalPath)
 	}
 	return functions
 }
-func collectImports(node *ast.File) map[string]string {
+
+func collectImports(node *dst.File) map[string]string {
 	imports := make(map[string]string)
 	for _, imp := range node.Imports {
 		if imp.Path != nil {
@@ -222,115 +148,68 @@ func collectImports(node *ast.File) map[string]string {
 				name = imp.Name.Name
 			} else {
 				name = filepath.Base(path)
-
 			}
 			imports[name] = path
 		}
 	}
 	return imports
 }
-func analyzeEmptyLines(content string) map[int]int {
-	lines := strings.Split(content, "\n")
-	emptyLineRuns := make(map[int]int)
-	currentRun := 0
-	lastNonEmptyLine := -1
 
-	for i, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			currentRun++
-		} else {
-			if currentRun > 0 && lastNonEmptyLine >= 0 {
-				emptyLineRuns[lastNonEmptyLine] = 1
-			}
-			currentRun = 0
-			lastNonEmptyLine = i
-		}
-	}
-	if currentRun > 0 && lastNonEmptyLine >= 0 {
-		emptyLineRuns[lastNonEmptyLine] = 1
-	}
-	return emptyLineRuns
-}
-func createFunctionInfo(funcDecl *ast.FuncDecl, pkgName, subPkg string, imports map[string]string) FunctionInfo {
-
+func createFunctionInfo(funcDecl *dst.FuncDecl, pkgName, subPkg string, imports map[string]string) FunctionInfo {
 	args := extractArgs(funcDecl)
 	receiverType := extractReceiverType(funcDecl)
 	return FunctionInfo{PackageName: pkgName, SubPackageName: subPkg, FunctionName: funcDecl.Name.Name, ReceiverType: receiverType, Args: args, Imports: imports, HasError: true}
 }
 
-func extractReceiverType(funcDecl *ast.FuncDecl) string {
+func extractReceiverType(funcDecl *dst.FuncDecl) string {
 	if funcDecl.Recv == nil || len(funcDecl.Recv.List) == 0 {
 		return ""
 	}
-	if starExpr, ok := funcDecl.Recv.List[0].Type.(*ast.StarExpr); ok {
-
-		if ident, ok := starExpr.X.(*ast.Ident); ok {
+	if starExpr, ok := funcDecl.Recv.List[0].Type.(*dst.StarExpr); ok {
+		if ident, ok := starExpr.X.(*dst.Ident); ok {
 			return ident.Name
 		}
-	} else if ident, ok := funcDecl.Recv.List[0].Type.(*ast.Ident); ok {
+	} else if ident, ok := funcDecl.Recv.List[0].Type.(*dst.Ident); ok {
 		return ident.Name
-
 	}
 	return ""
 }
-func writeModifiedFile(node *ast.File, path string, emptyLineRuns map[int]int) {
+
+func writeModifiedFile(node *dst.File, path string) {
 	removeUnusedImports(node)
+
 	var buf bytes.Buffer
-	cfg := printer.Config{Mode: printer.UseSpaces | printer.TabIndent, Tabwidth: 8}
-	fset := token.NewFileSet()
-	if err := cfg.Fprint(&buf, fset, node); err != nil {
-		return
+	if err := decorator.Fprint(&buf, node); err != nil {
+		fmt.Printf("Error formatting modified file: %v\n", err)
 	}
 
-	var result []string
-	lines := strings.Split(buf.String(), "\n")
-	emptyLineCount := 0
-
-	for i, line := range lines {
-		trimmedLine := strings.TrimSpace(line)
-		if trimmedLine != "" {
-			// Если это первая непустая строка после пустых строк
-			if emptyLineCount > 0 {
-				// Добавляем только одну пустую строку
-				result = append(result, "")
-				emptyLineCount = 0
-			}
-			result = append(result, line)
-		} else {
-			// Считаем последовательные пустые строки
-			emptyLineCount++
-			// Добавляем пустую строку только если это последняя строка файла
-			if i == len(lines)-1 {
-				result = append(result, "")
-			}
-		}
+	if err := os.WriteFile(path, buf.Bytes(), 0644); err != nil {
+		fmt.Printf("Error writing modified file: %v\n", err)
 	}
-
-	os.WriteFile(path, []byte(strings.Join(result, "\n")), 0644)
 }
-func hasErrorReturn(funcDecl *ast.FuncDecl) bool {
+
+func hasErrorReturn(funcDecl *dst.FuncDecl) bool {
 	if funcDecl.Type.Results == nil {
 		return false
 	}
 	for _, result := range funcDecl.Type.Results.List {
-		if ident, ok := result.Type.(*ast.Ident); ok {
+		if ident, ok := result.Type.(*dst.Ident); ok {
 			if ident.Name == "error" {
 				return true
-
 			}
 		}
 	}
 	return false
 }
 
-func getErrorReturnIndex(funcDecl *ast.FuncDecl) int {
+func getErrorReturnIndex(funcDecl *dst.FuncDecl) int {
 	if funcDecl.Type.Results == nil {
 		return -1
 	}
 	var totalIndex int
 	for _, result := range funcDecl.Type.Results.List {
 		if len(result.Names) == 0 {
-			if ident, ok := result.Type.(*ast.Ident); ok {
+			if ident, ok := result.Type.(*dst.Ident); ok {
 				if ident.Name == "error" {
 					return totalIndex
 				}
@@ -338,7 +217,7 @@ func getErrorReturnIndex(funcDecl *ast.FuncDecl) int {
 			totalIndex++
 		} else {
 			for range result.Names {
-				if ident, ok := result.Type.(*ast.Ident); ok {
+				if ident, ok := result.Type.(*dst.Ident); ok {
 					if ident.Name == "error" {
 						return totalIndex
 					}
@@ -346,43 +225,41 @@ func getErrorReturnIndex(funcDecl *ast.FuncDecl) int {
 				totalIndex++
 			}
 		}
-
 	}
 	return -1
 }
 
-func extractArgs(funcDecl *ast.FuncDecl) []ArgInfo {
+func extractArgs(funcDecl *dst.FuncDecl) []ArgInfo {
 	var args []ArgInfo
 	if funcDecl.Type.Params == nil {
 		return args
-
 	}
 	for _, field := range funcDecl.Type.Params.List {
 		typeStr := ""
 		switch t := field.Type.(type) {
-		case *ast.Ident:
+		case *dst.Ident:
 			typeStr = t.Name
-		case *ast.StarExpr:
-			if ident, ok := t.X.(*ast.Ident); ok {
+		case *dst.StarExpr:
+			if ident, ok := t.X.(*dst.Ident); ok {
 				typeStr = "*" + ident.Name
-			} else if sel, ok := t.X.(*ast.SelectorExpr); ok {
-				if ident, ok := sel.X.(*ast.Ident); ok {
+			} else if sel, ok := t.X.(*dst.SelectorExpr); ok {
+				if ident, ok := sel.X.(*dst.Ident); ok {
 					typeStr = "*" + ident.Name + "." + sel.Sel.Name
 				}
 			}
-		case *ast.ArrayType:
-			if ident, ok := t.Elt.(*ast.Ident); ok {
+		case *dst.ArrayType:
+			if ident, ok := t.Elt.(*dst.Ident); ok {
 				typeStr = "[]" + ident.Name
-			} else if sel, ok := t.Elt.(*ast.SelectorExpr); ok {
-				if ident, ok := sel.X.(*ast.Ident); ok {
+			} else if sel, ok := t.Elt.(*dst.SelectorExpr); ok {
+				if ident, ok := sel.X.(*dst.Ident); ok {
 					typeStr = "[]" + ident.Name + "." + sel.Sel.Name
 				}
 			}
-		case *ast.SelectorExpr:
-			if ident, ok := t.X.(*ast.Ident); ok {
+		case *dst.SelectorExpr:
+			if ident, ok := t.X.(*dst.Ident); ok {
 				typeStr = ident.Name + "." + t.Sel.Name
 			}
-		case *ast.InterfaceType:
+		case *dst.InterfaceType:
 			typeStr = "interface{}"
 		}
 
@@ -391,11 +268,11 @@ func extractArgs(funcDecl *ast.FuncDecl) []ArgInfo {
 		}
 		for _, name := range field.Names {
 			args = append(args, ArgInfo{Name: name.Name, Type: typeStr})
-
 		}
 	}
 	return args
 }
+
 func generateErrorFile(pkgName string, functions []FunctionInfo, pkgPath string) {
 	imports := make(map[string]string)
 	for _, f := range functions {
@@ -460,6 +337,7 @@ func New{{.FunctionName}}Error({{range .Args}}{{.Name}} {{.Type}}, {{end}}reason
 		err:    err,
 	}
 }
+
 func (e *{{.FunctionName}}Error) Error() string {
 	return "[" +
 		{{if .SubPackageName}}"{{.SubPackageName}}/" +{{end}}
@@ -469,7 +347,6 @@ func (e *{{.FunctionName}}Error) Error() string {
 		"{{.FunctionName}} - " +
 		e.reason +
 		{{if .Args}}
-
 		" - args: {" +
 		{{range $i, $arg := .Args}}{{if $i}} + ", " +{{end}}
 		"{{.Name}}: " + {{if eq .Type "string"}}e.{{.Name}}{{else if eq .Type "int"}}strconv.Itoa(e.{{.Name}}){{else if eq .Type "int64"}}strconv.FormatInt(e.{{.Name}}, 10){{else if eq .Type "uint64"}}strconv.FormatUint(e.{{.Name}}, 10){{else if eq .Type "float64"}}strconv.FormatFloat(e.{{.Name}}, 'f', -1, 64){{else if eq .Type "bool"}}strconv.FormatBool(e.{{.Name}}){{else}}fmt.Sprintf("%#v", e.{{.Name}}){{end}}{{end}} +
@@ -478,10 +355,15 @@ func (e *{{.FunctionName}}Error) Error() string {
 		"\n" +
 		e.err.Error()
 }
-func (e *{{.FunctionName}}Error) Unwrap() error {
 
+func (e *{{.FunctionName}}Error) Unwrap() error {
 	return e.err
 }
+
+func (e *{{.FunctionName}}Error) Is(err error) bool {
+	_, ok := err.(*{{.FunctionName}}Error)
+	return ok
+} 
 {{end}}`
 	data := struct {
 		Package   string
@@ -514,23 +396,23 @@ func (e *{{.FunctionName}}Error) Unwrap() error {
 	if err := cfg.Fprint(&buf, fset, astFile); err != nil {
 		panic(err)
 	}
-	if err := os.WriteFile(errFilePath, buf.Bytes(), 0644); err != nil {
+	if err := os.WriteFile(errFilePath, buf.Bytes(), 0o644); err != nil {
 		panic(err)
-
 	}
 }
+
 func isBasicType(typeName string) bool {
 	basicTypes := map[string]bool{"string": true, "int": true, "int64": true, "uint64": true, "float64": true, "bool": true, "interface{}": true}
 	return basicTypes[strings.TrimPrefix(typeName, "*")]
 }
 
-func modifyFunctionBody(funcDecl *ast.FuncDecl, info FunctionInfo) {
-	parentMap := make(map[ast.Node]ast.Node)
-	ast.Inspect(funcDecl.Body, func(n ast.Node) bool {
+func modifyFunctionBody(funcDecl *dst.FuncDecl, info FunctionInfo) {
+	parentMap := make(map[dst.Node]dst.Node)
+	dst.Inspect(funcDecl.Body, func(n dst.Node) bool {
 		if n == nil {
 			return false
 		}
-		ast.Inspect(n, func(child ast.Node) bool {
+		dst.Inspect(n, func(child dst.Node) bool {
 			if child == nil {
 				return false
 			}
@@ -547,8 +429,8 @@ func modifyFunctionBody(funcDecl *ast.FuncDecl, info FunctionInfo) {
 		return
 	}
 
-	ast.Inspect(funcDecl.Body, func(n ast.Node) bool {
-		returnStmt, ok := n.(*ast.ReturnStmt)
+	dst.Inspect(funcDecl.Body, func(n dst.Node) bool {
+		returnStmt, ok := n.(*dst.ReturnStmt)
 		if !ok || errorIndex >= len(returnStmt.Results) {
 			return true
 		}
@@ -579,18 +461,18 @@ func modifyFunctionBody(funcDecl *ast.FuncDecl, info FunctionInfo) {
 			useNilError = false
 		}
 
-		var errArg ast.Expr
+		var errArg dst.Expr
 		if useNilError {
-			errArg = ast.NewIdent("nil")
+			errArg = dst.NewIdent("nil")
 		} else {
 			errArg = result
 		}
 
-		constructorCall := &ast.CallExpr{
-			Fun: ast.NewIdent("New" + info.FunctionName + "Error"),
+		constructorCall := &dst.CallExpr{
+			Fun: dst.NewIdent("New" + info.FunctionName + "Error"),
 			Args: append(
 				getArgumentNames(funcDecl),
-				ast.NewIdent("\""+reason+"\""),
+				dst.NewIdent("\""+reason+"\""),
 				errArg,
 			),
 		}
@@ -598,35 +480,37 @@ func modifyFunctionBody(funcDecl *ast.FuncDecl, info FunctionInfo) {
 		return true
 	})
 }
-func isNilError(expr ast.Expr) bool {
-	if ident, ok := expr.(*ast.Ident); ok {
+
+func isNilError(expr dst.Expr) bool {
+	if ident, ok := expr.(*dst.Ident); ok {
 		return ident.Name == "nil"
 	}
 	return false
 }
-func getArgumentNames(funcDecl *ast.FuncDecl) []ast.Expr {
-	var args []ast.Expr
+
+func getArgumentNames(funcDecl *dst.FuncDecl) []dst.Expr {
+	var args []dst.Expr
 	if funcDecl.Type.Params != nil {
 		for _, field := range funcDecl.Type.Params.List {
 			for _, name := range field.Names {
-				args = append(args, ast.NewIdent(name.Name))
+				args = append(args, dst.NewIdent(name.Name))
 			}
 		}
 	}
 	return args
 }
 
-func isErrorWrapper(expr ast.Expr) bool {
-	if callExpr, ok := expr.(*ast.CallExpr); ok {
-		if ident, ok := callExpr.Fun.(*ast.Ident); ok {
+func isErrorWrapper(expr dst.Expr) bool {
+	if callExpr, ok := expr.(*dst.CallExpr); ok {
+		if ident, ok := callExpr.Fun.(*dst.Ident); ok {
 			return strings.HasSuffix(ident.Name, "Error")
 		}
-
 	}
 	return false
 }
-func removeUnusedImports(node *ast.File) {
-	imports := make(map[string]*ast.ImportSpec)
+
+func removeUnusedImports(node *dst.File) {
+	imports := make(map[string]*dst.ImportSpec)
 
 	for _, imp := range node.Imports {
 		if imp.Path != nil {
@@ -634,11 +518,11 @@ func removeUnusedImports(node *ast.File) {
 			imports[path] = imp
 		}
 	}
-	ast.Inspect(node, func(n ast.Node) bool {
+	dst.Inspect(node, func(n dst.Node) bool {
 		switch x := n.(type) {
-		case *ast.SelectorExpr:
+		case *dst.SelectorExpr:
 
-			if ident, ok := x.X.(*ast.Ident); ok {
+			if ident, ok := x.X.(*dst.Ident); ok {
 				for path, imp := range imports {
 					pkgName := ""
 					if imp.Name != nil {
@@ -651,13 +535,12 @@ func removeUnusedImports(node *ast.File) {
 					}
 				}
 			}
-		case *ast.CallExpr:
-			if sel, ok := x.Fun.(*ast.SelectorExpr); ok {
-				if ident, ok := sel.X.(*ast.Ident); ok {
+		case *dst.CallExpr:
+			if sel, ok := x.Fun.(*dst.SelectorExpr); ok {
+				if ident, ok := sel.X.(*dst.Ident); ok {
 					for path, imp := range imports {
 						pkgName := ""
 						if imp.Name != nil {
-
 							pkgName = imp.Name.Name
 						} else {
 							pkgName = filepath.Base(path)
@@ -672,15 +555,14 @@ func removeUnusedImports(node *ast.File) {
 		return true
 	})
 
-	var newImports []ast.Spec
+	var newImports []dst.Spec
 	for _, imp := range node.Decls {
-		if genDecl, ok := imp.(*ast.GenDecl); ok && genDecl.Tok == token.IMPORT {
+		if genDecl, ok := imp.(*dst.GenDecl); ok && genDecl.Tok == token.IMPORT {
 			for _, spec := range genDecl.Specs {
-				if importSpec, ok := spec.(*ast.ImportSpec); ok {
+				if importSpec, ok := spec.(*dst.ImportSpec); ok {
 					path := strings.Trim(importSpec.Path.Value, `"`)
 					if _, unused := imports[path]; !unused {
 						newImports = append(newImports, importSpec)
-
 					}
 				}
 			}
@@ -691,10 +573,9 @@ func removeUnusedImports(node *ast.File) {
 			}
 		}
 	}
-	var newDecls []ast.Decl
+	var newDecls []dst.Decl
 	for _, decl := range node.Decls {
-		if genDecl, ok := decl.(*ast.GenDecl); ok && genDecl.Tok == token.IMPORT {
-
+		if genDecl, ok := decl.(*dst.GenDecl); ok && genDecl.Tok == token.IMPORT {
 			if len(genDecl.Specs) > 0 {
 				newDecls = append(newDecls, decl)
 			}
@@ -704,14 +585,15 @@ func removeUnusedImports(node *ast.File) {
 	}
 	node.Decls = newDecls
 }
-func extractErrorMessage(expr ast.Expr) (string, bool, bool) {
+
+func extractErrorMessage(expr dst.Expr) (string, bool, bool) {
 	switch v := expr.(type) {
-	case *ast.CallExpr:
-		if sel, ok := v.Fun.(*ast.SelectorExpr); ok {
-			if ident, ok := sel.X.(*ast.Ident); ok {
-				if (ident.Name == "errors" && sel.Sel.Name == "New") || (ident.Name == "fmt" && (sel.Sel.Name == "Errorf" || sel.Sel.Name == "Error")) {
+	case *dst.CallExpr:
+		if sel, ok := v.Fun.(*dst.SelectorExpr); ok {
+			if ident, ok := sel.X.(*dst.Ident); ok {
+				if (ident.Name == "errors" && sel.Sel.Name == "New") || (ident.Name == "fmt" && (sel.Sel.Name == "Errorf")) {
 					if len(v.Args) > 0 {
-						if lit, ok := v.Args[0].(*ast.BasicLit); ok {
+						if lit, ok := v.Args[0].(*dst.BasicLit); ok {
 							return strings.Trim(lit.Value, `"`), true, true
 						}
 
@@ -723,34 +605,35 @@ func extractErrorMessage(expr ast.Expr) (string, bool, bool) {
 				return ident.Name + "." + sel.Sel.Name, true, false
 			}
 			return sel.Sel.Name, true, false
-		} else if ident, ok := v.Fun.(*ast.Ident); ok {
+		} else if ident, ok := v.Fun.(*dst.Ident); ok {
 			return ident.Name, true, false
 		}
-	case *ast.Ident:
+	case *dst.Ident:
 		if v.Name != "nil" {
 			return v.Name, true, false
 		}
 	}
 	return "", false, false
 }
-func findLastFunctionCall(node ast.Node, parentMap map[ast.Node]ast.Node) (string, bool, bool) {
+
+func findLastFunctionCall(node dst.Node, parentMap map[dst.Node]dst.Node) (string, bool, bool) {
 	parent := parentMap[node]
 	for parent != nil {
-		if ifStmt, ok := parent.(*ast.IfStmt); ok {
-			if assignStmt, ok := ifStmt.Init.(*ast.AssignStmt); ok {
+		if ifStmt, ok := parent.(*dst.IfStmt); ok {
+			if assignStmt, ok := ifStmt.Init.(*dst.AssignStmt); ok {
 				if len(assignStmt.Lhs) > 0 && len(assignStmt.Rhs) > 0 {
 					// Проверяем, что левая часть это err
-					if errIdent, ok := assignStmt.Lhs[0].(*ast.Ident); ok && errIdent.Name == "err" {
-						if callExpr, ok := assignStmt.Rhs[0].(*ast.CallExpr); ok {
+					if errIdent, ok := assignStmt.Lhs[0].(*dst.Ident); ok && errIdent.Name == "err" {
+						if callExpr, ok := assignStmt.Rhs[0].(*dst.CallExpr); ok {
 							// Получаем полное имя вызываемой функции
-							if sel, ok := callExpr.Fun.(*ast.SelectorExpr); ok {
-								if recv, ok := sel.X.(*ast.Ident); ok {
+							if sel, ok := callExpr.Fun.(*dst.SelectorExpr); ok {
+								if recv, ok := sel.X.(*dst.Ident); ok {
 									// Для методов возвращаем receiver.method
 									return recv.Name + "." + sel.Sel.Name, true, false
 								}
 								// Для функций пакета возвращаем pkg.func
 								return sel.Sel.Name, true, false
-							} else if ident, ok := callExpr.Fun.(*ast.Ident); ok {
+							} else if ident, ok := callExpr.Fun.(*dst.Ident); ok {
 								// Для локальных функций возвращаем имя функции
 								return ident.Name, true, false
 							}
