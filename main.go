@@ -37,10 +37,14 @@ type ErrorTemplate struct {
 	Functions []FunctionInfo
 }
 
+type PkgInfo struct {
+	Name string
+	Path string
+}
+
 type FileProcessor struct {
-	packages     map[string][]FunctionInfo
-	packagePaths map[string]string
-	currentDir   string
+	packages   map[PkgInfo][]FunctionInfo
+	currentDir string
 }
 
 func main() {
@@ -59,7 +63,7 @@ func newFileProcessor() (*FileProcessor, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &FileProcessor{currentDir: currentDir, packages: make(map[string][]FunctionInfo), packagePaths: make(map[string]string)}, nil
+	return &FileProcessor{currentDir: currentDir, packages: make(map[PkgInfo][]FunctionInfo)}, nil
 }
 
 func (p *FileProcessor) processFiles() error {
@@ -88,21 +92,19 @@ func (p *FileProcessor) processFile(path string) error {
 		return err
 	}
 
-	pkgName := node.Name.Name
-	pkgDir := filepath.Dir(path)
-	subPkg := getSubPackageName(pkgDir, p.currentDir)
+	pkgInfo := PkgInfo{Name: node.Name.Name, Path: filepath.Dir(path)}
+	subPkg := getSubPackageName(pkgInfo.Path, p.currentDir)
 	fileName := filepath.Base(path)
-	functions := analyzeFunctions(node, pkgName, subPkg, p.currentDir, fileName)
+	functions := analyzeFunctions(node, pkgInfo.Name, subPkg, p.currentDir, fileName)
 	if len(functions) > 0 {
-		p.packages[pkgName] = append(p.packages[pkgName], functions...)
-		p.packagePaths[pkgName] = pkgDir
+		p.packages[pkgInfo] = append(p.packages[pkgInfo], functions...)
 	}
 	return nil
 }
 
 func (p *FileProcessor) generateErrorFiles() {
 	for pkg, functions := range p.packages {
-		generateErrorFile(pkg, functions, p.packagePaths[pkg])
+		generateErrorFile(pkg, functions)
 	}
 }
 
@@ -272,7 +274,7 @@ func extractArgs(funcDecl *dst.FuncDecl) []ArgInfo {
 	return args
 }
 
-func generateErrorFile(pkgName string, functions []FunctionInfo, pkgPath string) {
+func generateErrorFile(pkgInfo PkgInfo, functions []FunctionInfo) {
 	imports := make(map[string]string)
 	for _, f := range functions {
 		for _, arg := range f.Args {
@@ -310,7 +312,7 @@ func generateErrorFile(pkgName string, functions []FunctionInfo, pkgPath string)
 		importsList = append(importsList, fmt.Sprintf(`	"%s"`, imp))
 	}
 	sort.Strings(importsList)
-	templateData := ErrorTemplate{Package: pkgName, Functions: functions}
+	templateData := ErrorTemplate{Package: pkgInfo.Name, Functions: functions}
 	tmpl := `package {{.Package}}
 import (
 {{range .Imports}}{{.}}
@@ -373,7 +375,7 @@ func (e *{{.FunctionName}}Error) Is(err error) bool {
 		Functions []FunctionInfo
 		Imports   []string
 	}{Package: templateData.Package, Functions: templateData.Functions, Imports: importsList}
-	errFilePath := filepath.Join(pkgPath, "errors.go")
+	errFilePath := filepath.Join(pkgInfo.Path, "errors.go")
 	f, err := os.Create(errFilePath)
 	if err != nil {
 		panic(err)
