@@ -327,6 +327,10 @@ type {{.FunctionName}}Error struct {
 }
 
 func New{{.FunctionName}}Error({{range .Args}}{{.Name}} {{.Type}}, {{end}}reason string, err error) *{{.FunctionName}}Error {
+	if err == nil {
+		return nil
+	}
+
 	return &{{.FunctionName}}Error{
 		{{- range .Args}}
 		{{.Name}}: {{.Name}},

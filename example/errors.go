@@ -12,6 +12,10 @@ type UpdateNameError struct {
 }
 
 func NewUpdateNameError(newName string, reason string, err error) *UpdateNameError {
+	if err == nil {
+		return nil
+	}
+
 	return &UpdateNameError{
 		newName: newName,
 		reason:  reason,
@@ -55,6 +59,10 @@ type ProcessUserError struct {
 }
 
 func NewProcessUserError(user *User, count int, reason string, err error) *ProcessUserError {
+	if err == nil {
+		return nil
+	}
+
 	return &ProcessUserError{
 		user:   user,
 		count:  count,
@@ -100,6 +108,10 @@ type IsOlderError struct {
 }
 
 func NewIsOlderError(user *User, count int, reason string, err error) *IsOlderError {
+	if err == nil {
+		return nil
+	}
+
 	return &IsOlderError{
 		user:   user,
 		count:  count,
@@ -145,6 +157,10 @@ type IsYoungerError struct {
 }
 
 func NewIsYoungerError(user *User, count int, reason string, err error) *IsYoungerError {
+	if err == nil {
+		return nil
+	}
+
 	return &IsYoungerError{
 		user:   user,
 		count:  count,
@@ -190,6 +206,10 @@ type IsYoungerOrOlderError struct {
 }
 
 func NewIsYoungerOrOlderError(user *User, count int, reason string, err error) *IsYoungerOrOlderError {
+	if err == nil {
+		return nil
+	}
+
 	return &IsYoungerOrOlderError{
 		user:   user,
 		count:  count,
