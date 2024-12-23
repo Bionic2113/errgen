@@ -93,6 +93,10 @@ func (p *FileProcessor) processFile(path string) error {
 	}
 
 	pkgInfo := PkgInfo{Name: node.Name.Name, Path: filepath.Dir(path)}
+	// пропустим моки
+	if strings.HasSuffix(pkgInfo.Path, "mocks") {
+		return nil
+	}
 	subPkg := getSubPackageName(pkgInfo.Path, p.currentDir)
 	fileName := filepath.Base(path)
 	functions := analyzeFunctions(node, pkgInfo.Name, subPkg, p.currentDir, fileName)
@@ -458,19 +462,19 @@ func modifyFunctionBody(funcDecl *dst.FuncDecl, info FunctionInfo) {
 			reason = msg
 			useNilError = useNil
 			// Проверяем, не является ли ошибка результатом вызова функции
-		} else if msg, ok, useNil := findLastFunctionCall(returnStmt, parentMap); ok {
+		} else if msg, ok := findLastFunctionCall(returnStmt, parentMap); ok {
 			reason = msg
-			useNilError = useNil
 		} else {
 			reason = "unknown error in " + info.FunctionName
-			useNilError = false
 		}
 
-		var errArg dst.Expr
-		if useNilError {
-			errArg = dst.NewIdent("nil")
-		} else {
-			errArg = result
+		errArg := isErrorWrapper(result)
+		if errArg == nil {
+			if useNilError {
+				errArg = dst.NewIdent("nil")
+			} else {
+				errArg = result
+			}
 		}
 
 		constructorCall := &dst.CallExpr{
@@ -505,13 +509,15 @@ func getArgumentNames(funcDecl *dst.FuncDecl) []dst.Expr {
 	return args
 }
 
-func isErrorWrapper(expr dst.Expr) bool {
+func isErrorWrapper(expr dst.Expr) dst.Expr {
 	if callExpr, ok := expr.(*dst.CallExpr); ok {
 		if ident, ok := callExpr.Fun.(*dst.Ident); ok {
-			return strings.HasSuffix(ident.Name, "Error")
+			if strings.HasSuffix(ident.Name, "Error") {
+				return callExpr.Args[len(callExpr.Args)-1]
+			}
 		}
 	}
-	return false
+	return nil
 }
 
 func removeUnusedImports(node *dst.File) {
@@ -614,46 +620,138 @@ func extractErrorMessage(expr dst.Expr) (string, bool, bool) {
 			// Если уже была обертка, то забираем причину
 			if strings.HasSuffix(ident.Name, "Error") && len(v.Args) > 1 {
 				if lit, ok := v.Args[len(v.Args)-2].(*dst.BasicLit); ok {
-					return strings.Trim(lit.Value, `"`), true, true
+					return strings.Trim(lit.Value, `"`), true, false
 				}
 			}
 			return ident.Name, true, false
-		}
-	case *dst.Ident:
-		if v.Name != "nil" {
-			return v.Name, true, false
 		}
 	}
 	return "", false, false
 }
 
-func findLastFunctionCall(node dst.Node, parentMap map[dst.Node]dst.Node) (string, bool, bool) {
+func findLastFunctionCall(node dst.Node, parentMap map[dst.Node]dst.Node) (string, bool) {
 	parent := parentMap[node]
 	for parent != nil {
-		if ifStmt, ok := parent.(*dst.IfStmt); ok {
-			if assignStmt, ok := ifStmt.Init.(*dst.AssignStmt); ok {
-				if len(assignStmt.Lhs) > 0 && len(assignStmt.Rhs) > 0 {
-					// Проверяем, что левая часть это err
-					if errIdent, ok := assignStmt.Lhs[0].(*dst.Ident); ok && errIdent.Name == "err" {
-						if callExpr, ok := assignStmt.Rhs[0].(*dst.CallExpr); ok {
-							// Получаем полное имя вызываемой функции
-							if sel, ok := callExpr.Fun.(*dst.SelectorExpr); ok {
-								if recv, ok := sel.X.(*dst.Ident); ok {
-									// Для методов возвращаем receiver.method
-									return recv.Name + "." + sel.Sel.Name, true, false
-								}
-								// Для функций пакета возвращаем pkg.func
-								return sel.Sel.Name, true, false
-							} else if ident, ok := callExpr.Fun.(*dst.Ident); ok {
-								// Для локальных функций возвращаем имя функции
-								return ident.Name, true, false
-							}
+		var assignStmt *dst.AssignStmt
+		switch stmt := parent.(type) {
+		default:
+			parent = parentMap[parent]
+			continue
+		case *dst.AssignStmt:
+			assignStmt = stmt
+		case *dst.IfStmt:
+			a, ok := stmt.Init.(*dst.AssignStmt)
+			if !ok {
+				p := parentMap[stmt]
+				b, ok := p.(*dst.BlockStmt)
+				if !ok {
+					parent = parentMap[parent]
+					continue
+				}
+				for i, v := range b.List {
+					if v == stmt {
+						if a, ok := b.List[i-1].(*dst.AssignStmt); ok {
+							assignStmt = a
+							break
 						}
+					}
+				}
+				if assignStmt == nil {
+					parent = parentMap[parent]
+					continue
+				}
+			} else {
+				assignStmt = a
+			}
+		case *dst.BlockStmt:
+			assignStmt = blockStmt(stmt)
+			if assignStmt == nil {
+				parent = parentMap[parent]
+				continue
+			}
+
+		}
+
+		index := -1
+		for i, field := range assignStmt.Lhs {
+			f, ok := field.(*dst.Ident)
+			if !ok {
+				continue
+			}
+			if strings.HasPrefix(f.Name, "err") ||
+				strings.HasSuffix(f.Name, "err") ||
+				strings.HasSuffix(f.Name, "Err") {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			parent = parentMap[parent]
+			continue
+		}
+		rhs := assignStmt.Rhs[0]
+		if len(assignStmt.Rhs) > 1 {
+			rhs = assignStmt.Rhs[index]
+		}
+
+		return reason(rhs), true
+	}
+	return "", false
+}
+
+func reason(expr dst.Expr) string {
+	switch v := expr.(type) {
+	default:
+		fmt.Printf("reason default: %#v\n", v)
+		return ""
+	case *dst.CallExpr:
+		return reason(v.Fun)
+	case *dst.Ident:
+		return v.Name
+	case *dst.SelectorExpr:
+		return reason(v.X) + "." + v.Sel.Name
+	}
+}
+
+func blockStmt(stmt *dst.BlockStmt) *dst.AssignStmt {
+	for i := len(stmt.List) - 1; i >= 0; i-- {
+		assignStmt, ok := stmt.List[i].(*dst.AssignStmt)
+		if !ok {
+			continue
+		}
+		index := -1
+		for i, field := range assignStmt.Lhs {
+			f, ok := field.(*dst.Ident)
+			if !ok {
+				continue
+			}
+			if strings.HasPrefix(f.Name, "err") ||
+				strings.HasSuffix(f.Name, "err") ||
+				strings.HasSuffix(f.Name, "Err") {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			continue
+		}
+		rhs := assignStmt.Rhs[0]
+		if len(assignStmt.Rhs) > 1 {
+			rhs = assignStmt.Rhs[index]
+		}
+		// Да, всё это выглядит убого. Потом перепишу.
+		// Здесь пропускаем errors.Join, тк странно такую причину указывать.
+		// Поищем повыше
+		if call, ok := rhs.(*dst.CallExpr); ok {
+			if f, ok := call.Fun.(*dst.SelectorExpr); ok {
+				if f.Sel.Name == "errors" {
+					if ident, ok := f.X.(*dst.Ident); ok && ident.Name == "Join" {
+						continue
 					}
 				}
 			}
 		}
-		parent = parentMap[parent]
+		return assignStmt
 	}
-	return "", false, false
+	return nil
 }
