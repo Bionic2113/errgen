@@ -650,6 +650,9 @@ func findLastFunctionCall(node dst.Node, parentMap map[dst.Node]dst.Node) (strin
 				}
 				for i, v := range b.List {
 					if v == stmt {
+						if i == 0 {
+							break
+						}
 						if a, ok := b.List[i-1].(*dst.AssignStmt); ok {
 							assignStmt = a
 							break
