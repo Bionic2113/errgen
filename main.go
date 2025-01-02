@@ -8,6 +8,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"text/template"
@@ -15,6 +16,14 @@ import (
 	"github.com/dave/dst"
 	"github.com/dave/dst/decorator"
 )
+
+var versionMatch *regexp.Regexp = regexp.MustCompile(`^(/?\w+(\.?|-?))+(/v\d+)$`)
+
+// (`^(/?\w+(\.?|-?\w+))+(/v\d+)$`) //(`^\w+/\w+(/v\d+)$`)
+
+var prefixAndSuffixMatch *regexp.Regexp = regexp.MustCompile(`(go-\w+)|(\w+-go)`)
+
+//(`^(\w+(\.?|-?\w+)*/)+((go-\w+)|(\w+\-go))$`)
 
 type FunctionInfo struct {
 	PackageName    string
@@ -146,19 +155,41 @@ func analyzeFunctions(node *dst.File, pkgName, subPkg string, currentDir string,
 func collectImports(node *dst.File) map[string]string {
 	imports := make(map[string]string)
 	for _, imp := range node.Imports {
-		if imp.Path != nil {
-			path := strings.Trim(imp.Path.Value, `"`)
-
-			name := ""
-			if imp.Name != nil {
-				name = imp.Name.Name
-			} else {
-				name = filepath.Base(path)
-			}
-			imports[name] = path
+		if imp.Path == nil {
+			continue
 		}
+		path := strings.Trim(imp.Path.Value, `"`)
+
+		if imp.Name != nil {
+			imports[imp.Name.Name] = path
+			continue
+		}
+
+		imports[nameFromPath(path)] = path
 	}
 	return imports
+}
+
+func nameFromPath(path string) string {
+	// Удаляем версии пакетов, если есть
+	matches := versionMatch.FindStringSubmatch(path)
+	if len(matches) > 0 {
+		path = strings.ReplaceAll(path, matches[len(matches)-1], "")
+		// matches = append(matches[:len(matches)-1], matches[len(matches):]...)
+	}
+	name := filepath.Base(path)
+
+	// Удаляем префикс или суффикс go
+	matches = prefixAndSuffixMatch.FindStringSubmatch(name)
+	if len(matches) == 0 {
+		return name
+	}
+
+	if matches[1] == "" {
+		return strings.TrimSuffix(name, "-go")
+	}
+
+	return strings.TrimPrefix(name, "go-")
 }
 
 func createFunctionInfo(funcDecl *dst.FuncDecl, pkgName, subPkg string, imports map[string]string) FunctionInfo {
@@ -261,6 +292,14 @@ func extractArgs(funcDecl *dst.FuncDecl) []ArgInfo {
 			} else if sel, ok := t.Elt.(*dst.SelectorExpr); ok {
 				if ident, ok := sel.X.(*dst.Ident); ok {
 					typeStr = "[]" + ident.Name + "." + sel.Sel.Name
+				}
+			} else if t, ok := t.Elt.(*dst.StarExpr); ok {
+				if ident, ok := t.X.(*dst.Ident); ok {
+					typeStr = "[]*" + ident.Name
+				} else if sel, ok := t.X.(*dst.SelectorExpr); ok {
+					if ident, ok := sel.X.(*dst.Ident); ok {
+						typeStr = "[]*" + ident.Name + "." + sel.Sel.Name
+					}
 				}
 			}
 		case *dst.SelectorExpr:
@@ -539,7 +578,7 @@ func removeUnusedImports(node *dst.File) {
 					if imp.Name != nil {
 						pkgName = imp.Name.Name
 					} else {
-						pkgName = filepath.Base(path)
+						pkgName = nameFromPath(path)
 					}
 					if ident.Name == pkgName {
 						delete(imports, path)
@@ -554,7 +593,7 @@ func removeUnusedImports(node *dst.File) {
 						if imp.Name != nil {
 							pkgName = imp.Name.Name
 						} else {
-							pkgName = filepath.Base(path)
+							pkgName = nameFromPath(path)
 						}
 						if ident.Name == pkgName {
 							delete(imports, path)
