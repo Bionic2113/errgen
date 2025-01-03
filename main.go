@@ -493,6 +493,10 @@ func modifyFunctionBody(funcDecl *dst.FuncDecl, info FunctionInfo) {
 			return true
 		}
 
+		if !isNeedChange(result) {
+			return true
+		}
+
 		// if isErrorWrapper(result) {
 		// 	return true
 		// }
@@ -538,6 +542,30 @@ func isNilError(expr dst.Expr) bool {
 	if ident, ok := expr.(*dst.Ident); ok {
 		return ident.Name == "nil"
 	}
+	return false
+}
+
+// Проверяем нужно ли нам заменить возврат ошибки
+// на обертку
+func isNeedChange(expr dst.Expr) bool {
+	call, ok := expr.(*dst.CallExpr)
+	if !ok {
+		return true
+	}
+
+	// Если не наша обертка, то пропускаем
+	if ident, ok := call.Fun.(*dst.Ident); ok {
+		return !strings.HasSuffix(ident.Name, "Error")
+	}
+
+	// Если эти функции - это создание через fmt или errors,
+	// то обрабатываем
+	if selector, ok := call.Fun.(*dst.SelectorExpr); ok {
+		if ident, ok := selector.X.(*dst.Ident); ok {
+			return ident.Name == "fmt" || ident.Name == "errors"
+		}
+	}
+
 	return false
 }
 
