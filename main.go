@@ -31,7 +31,7 @@ type FunctionInfo struct {
 	FunctionName   string
 	ReceiverType   string
 	Args           []ArgInfo
-	Imports        map[string]string
+	Imports        map[string]Path
 
 	HasError bool
 }
@@ -48,7 +48,12 @@ type ErrorTemplate struct {
 
 type PkgInfo struct {
 	Name string
-	Path string
+	Path Path
+}
+
+type Path struct {
+	Alias string
+	Path  string
 }
 
 type FileProcessor struct {
@@ -101,12 +106,12 @@ func (p *FileProcessor) processFile(path string) error {
 		return err
 	}
 
-	pkgInfo := PkgInfo{Name: node.Name.Name, Path: filepath.Dir(path)}
+	pkgInfo := PkgInfo{Name: node.Name.Name, Path: Path{Path: filepath.Dir(path)}}
 	// пропустим моки
-	if strings.HasSuffix(pkgInfo.Path, "mocks") {
+	if strings.HasSuffix(pkgInfo.Path.Path, "mocks") {
 		return nil
 	}
-	subPkg := getSubPackageName(pkgInfo.Path, p.currentDir)
+	subPkg := getSubPackageName(pkgInfo.Path.Path, p.currentDir)
 	fileName := filepath.Base(path)
 	functions := analyzeFunctions(node, pkgInfo.Name, subPkg, p.currentDir, fileName)
 	if len(functions) > 0 {
@@ -152,8 +157,8 @@ func analyzeFunctions(node *dst.File, pkgName, subPkg string, currentDir string,
 	return functions
 }
 
-func collectImports(node *dst.File) map[string]string {
-	imports := make(map[string]string)
+func collectImports(node *dst.File) map[string]Path {
+	imports := make(map[string]Path)
 	for _, imp := range node.Imports {
 		if imp.Path == nil {
 			continue
@@ -161,11 +166,11 @@ func collectImports(node *dst.File) map[string]string {
 		path := strings.Trim(imp.Path.Value, `"`)
 
 		if imp.Name != nil {
-			imports[imp.Name.Name] = path
+			imports[imp.Name.Name] = Path{Alias: imp.Name.Name, Path: path}
 			continue
 		}
 
-		imports[nameFromPath(path)] = path
+		imports[nameFromPath(path)] = Path{Path: path}
 	}
 	return imports
 }
@@ -175,8 +180,8 @@ func nameFromPath(path string) string {
 	matches := versionMatch.FindStringSubmatch(path)
 	if len(matches) > 0 {
 		path = strings.ReplaceAll(path, matches[len(matches)-1], "")
-		// matches = append(matches[:len(matches)-1], matches[len(matches):]...)
 	}
+
 	name := filepath.Base(path)
 
 	// Удаляем префикс или суффикс go
@@ -192,7 +197,7 @@ func nameFromPath(path string) string {
 	return strings.TrimPrefix(name, "go-")
 }
 
-func createFunctionInfo(funcDecl *dst.FuncDecl, pkgName, subPkg string, imports map[string]string) FunctionInfo {
+func createFunctionInfo(funcDecl *dst.FuncDecl, pkgName, subPkg string, imports map[string]Path) FunctionInfo {
 	args := extractArgs(funcDecl)
 	receiverType := extractReceiverType(funcDecl)
 	return FunctionInfo{PackageName: pkgName, SubPackageName: subPkg, FunctionName: funcDecl.Name.Name, ReceiverType: receiverType, Args: args, Imports: imports, HasError: true}
@@ -318,30 +323,30 @@ func extractArgs(funcDecl *dst.FuncDecl) []ArgInfo {
 }
 
 func generateErrorFile(pkgInfo PkgInfo, functions []FunctionInfo) {
-	imports := make(map[string]string)
+	imports := map[string]Path{"errors": {Path: "errors"}}
 	for _, f := range functions {
 		for _, arg := range f.Args {
 
 			switch {
 			case strings.HasPrefix(arg.Type, "time."):
-				imports["time"] = "time"
+				imports["time"] = Path{Path: "time"}
 
 			case arg.Type == "int" || arg.Type == "int64" || arg.Type == "uint64":
-				imports["strconv"] = "strconv"
+				imports["strconv"] = Path{Path: "strconv"}
 			case arg.Type == "float64":
-				imports["strconv"] = "strconv"
+				imports["strconv"] = Path{Path: "strconv"}
 
 			case arg.Type == "bool":
-				imports["strconv"] = "strconv"
+				imports["strconv"] = Path{Path: "strconv"}
 			case arg.Type == "any" || strings.Contains(arg.Type, "[]"):
-				imports["fmt"] = "fmt"
+				imports["fmt"] = Path{Path: "fmt"}
 			case !isBasicType(arg.Type):
-				imports["fmt"] = "fmt"
+				imports["fmt"] = Path{Path: "fmt"}
 			}
 			if strings.Contains(arg.Type, ".") {
 				parts := strings.SplitN(arg.Type, ".", 2)
 				if len(parts) == 2 {
-					pkgName := strings.TrimPrefix(parts[0], "*")
+					pkgName := strings.TrimPrefix(strings.TrimPrefix(parts[0], "[]"), "*")
 					if importPath, ok := f.Imports[pkgName]; ok {
 						imports[pkgName] = importPath
 					}
@@ -352,7 +357,7 @@ func generateErrorFile(pkgInfo PkgInfo, functions []FunctionInfo) {
 
 	var importsList []string
 	for _, imp := range imports {
-		importsList = append(importsList, fmt.Sprintf(`	"%s"`, imp))
+		importsList = append(importsList, imp.Alias+" "+`"`+imp.Path+`"`)
 	}
 	sort.Strings(importsList)
 	templateData := ErrorTemplate{Package: pkgInfo.Name, Functions: functions}
@@ -378,10 +383,8 @@ func New{{.FunctionName}}Error({{range .Args}}{{.Name}} {{.Type}}, {{end}}reason
 	return &{{.FunctionName}}Error{
 		{{- range .Args}}
 		{{.Name}}: {{.Name}},
-
 		{{- end}}
 		reason: reason,
-
 		err:    err,
 	}
 }
@@ -408,9 +411,11 @@ func (e *{{.FunctionName}}Error) Unwrap() error {
 	return e.err
 }
 
-func (e *{{.FunctionName}}Error) Is(err error) bool {
-	_, ok := err.(*{{.FunctionName}}Error)
-	return ok
+func (e *{{.FunctionName}}Error) Is(target error) bool {
+	if _, ok := target.(*{{.FunctionName}}Error); ok {
+		return true
+	}
+	return errors.Is(e.err, target)
 } 
 {{end}}`
 	data := struct {
@@ -418,7 +423,7 @@ func (e *{{.FunctionName}}Error) Is(err error) bool {
 		Functions []FunctionInfo
 		Imports   []string
 	}{Package: templateData.Package, Functions: templateData.Functions, Imports: importsList}
-	errFilePath := filepath.Join(pkgInfo.Path, "errors.go")
+	errFilePath := filepath.Join(pkgInfo.Path.Path, "errors.go")
 	f, err := os.Create(errFilePath)
 	if err != nil {
 		panic(err)
