@@ -250,23 +250,23 @@ func getErrorReturnIndex(funcDecl *dst.FuncDecl) int {
 	}
 	var totalIndex int
 	for _, result := range funcDecl.Type.Results.List {
-		if len(result.Names) == 0 {
-			if ident, ok := result.Type.(*dst.Ident); ok {
-				if ident.Name == "error" {
-					return totalIndex
-				}
-			}
-			totalIndex++
-		} else {
-			for range result.Names {
-				if ident, ok := result.Type.(*dst.Ident); ok {
-					if ident.Name == "error" {
-						return totalIndex
-					}
-				}
-				totalIndex++
+		// if len(result.Names) == 0 {
+		if ident, ok := result.Type.(*dst.Ident); ok {
+			if ident.Name == "error" {
+				return totalIndex
 			}
 		}
+		totalIndex++
+		// } else {
+		// 	for range result.Names {
+		// 		if ident, ok := result.Type.(*dst.Ident); ok {
+		// 			if ident.Name == "error" {
+		// 				return totalIndex
+		// 			}
+		// 		}
+		// 		totalIndex++
+		// 	}
+		// }
 	}
 	return -1
 }
@@ -510,7 +510,10 @@ func modifyFunctionBody(funcDecl *dst.FuncDecl, info FunctionInfo) {
 			reason = msg
 			useNilError = useNil
 			// Проверяем, не является ли ошибка результатом вызова функции
-		} else if msg, ok := findLastFunctionCall(returnStmt, parentMap); ok {
+		} else if msg, ok, funcLit := findLastFunctionCall(returnStmt, parentMap); ok || funcLit {
+			if funcLit {
+				return true
+			}
 			reason = msg
 		} else {
 			reason = "unknown error in " + info.FunctionName
@@ -701,7 +704,7 @@ func extractErrorMessage(expr dst.Expr) (string, bool, bool) {
 	return "", false, false
 }
 
-func findLastFunctionCall(node dst.Node, parentMap map[dst.Node]dst.Node) (string, bool) {
+func findLastFunctionCall(node dst.Node, parentMap map[dst.Node]dst.Node) (string, bool, bool) {
 	parent := parentMap[node]
 	for parent != nil {
 		var assignStmt *dst.AssignStmt
@@ -709,6 +712,8 @@ func findLastFunctionCall(node dst.Node, parentMap map[dst.Node]dst.Node) (strin
 		default:
 			parent = parentMap[parent]
 			continue
+		case *dst.FuncLit:
+			return "", false, true
 		case *dst.AssignStmt:
 			assignStmt = stmt
 		case *dst.IfStmt:
@@ -769,9 +774,9 @@ func findLastFunctionCall(node dst.Node, parentMap map[dst.Node]dst.Node) (strin
 			rhs = assignStmt.Rhs[index]
 		}
 
-		return reason(rhs), true
+		return reason(rhs), true, false
 	}
-	return "", false
+	return "", false, false
 }
 
 func reason(expr dst.Expr) string {
