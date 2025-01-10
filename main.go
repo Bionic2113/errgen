@@ -90,6 +90,7 @@ func (p *FileProcessor) processFiles() error {
 		if info.IsDir() ||
 			!strings.HasSuffix(path, ".go") ||
 			strings.HasSuffix(path, "_test.go") ||
+			strings.HasSuffix(path, ".pb.go") ||
 			strings.HasSuffix(path, "errors.go") ||
 			strings.HasSuffix(path, "main.go") {
 			return nil
@@ -376,10 +377,6 @@ type {{.FunctionName}}Error struct {
 }
 
 func New{{.FunctionName}}Error({{range .Args}}{{.Name}} {{.Type}}, {{end}}reason string, err error) *{{.FunctionName}}Error {
-	if err == nil {
-		return nil
-	}
-
 	return &{{.FunctionName}}Error{
 		{{- range .Args}}
 		{{.Name}}: {{.Name}},
