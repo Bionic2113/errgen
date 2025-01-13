@@ -90,6 +90,7 @@ func (p *FileProcessor) processFiles() error {
 		if info.IsDir() ||
 			!strings.HasSuffix(path, ".go") ||
 			strings.HasSuffix(path, "_test.go") ||
+			strings.HasSuffix(path, "_mock.go") ||
 			strings.HasSuffix(path, ".pb.go") ||
 			strings.HasSuffix(path, "errors.go") ||
 			strings.HasSuffix(path, "main.go") {
