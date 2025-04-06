@@ -23,7 +23,7 @@ type ErrorTemplate struct {
 
 type PkgInfo struct {
 	Name string
-	Path Path
+	Path string
 }
 
 type Path struct {

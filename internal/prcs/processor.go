@@ -53,13 +53,13 @@ func (p *FileProcessor) ProcessFile(path string) error {
 		return err
 	}
 
-	pkgInfo := utils.PkgInfo{Name: node.Name.Name, Path: utils.Path{Path: filepath.Dir(path)}}
+	pkgInfo := utils.PkgInfo{Name: node.Name.Name, Path: filepath.Dir(path)}
 	// пропустим моки
-	if strings.HasSuffix(pkgInfo.Path.Path, "mocks") {
+	if strings.HasSuffix(pkgInfo.Path, "mocks") {
 		return nil
 	}
 
-	subPkg := utils.SubPackageName(pkgInfo.Path.Path, p.currentDir)
+	subPkg := utils.SubPackageName(pkgInfo.Path, p.currentDir)
 	fileName := filepath.Base(path)
 	functions := utils.AnalyzeFunctions(node, pkgInfo.Name, subPkg, p.currentDir, fileName)
 	if len(functions) > 0 {

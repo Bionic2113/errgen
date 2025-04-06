@@ -51,6 +51,7 @@ func AnalyzeFunctions(node *dst.File, pkgName, subPkg string, currentDir string,
 	})
 
 	if len(functions) > 0 {
+		RemoveUnusedImports(node)
 		WriteModifiedFile(node, originalPath)
 	}
 
@@ -122,8 +123,6 @@ func ExtractReceiverType(funcDecl *dst.FuncDecl) string {
 }
 
 func WriteModifiedFile(node *dst.File, path string) {
-	RemoveUnusedImports(node)
-
 	var buf bytes.Buffer
 	if err := decorator.Fprint(&buf, node); err != nil {
 		fmt.Printf("Error formatting modified file: %v\n", err)
@@ -329,7 +328,7 @@ func (e *{{.FunctionName}}Error) Is(target error) bool {
 		Imports   []string
 	}{Package: templateData.Package, Functions: templateData.Functions, Imports: importsList}
 
-	errFilePath := filepath.Join(pkgInfo.Path.Path, "errors.go")
+	errFilePath := filepath.Join(pkgInfo.Path, "errors.go")
 
 	f, err := os.Create(errFilePath)
 	if err != nil {
@@ -590,6 +589,7 @@ func RemoveUnusedImports(node *dst.File) {
 	node.Decls = newDecls
 }
 
+// TODO: refactor
 func ExtractErrorMessage(expr dst.Expr) (string, bool, bool) {
 	switch v := expr.(type) {
 	case *dst.CallExpr:
