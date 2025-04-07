@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/dave/dst"
@@ -21,6 +20,10 @@ var (
 	versionMatch         *regexp.Regexp = regexp.MustCompile(`^(/?\w+(\.?|-?))+(/v\d+)$`)
 	prefixAndSuffixMatch *regexp.Regexp = regexp.MustCompile(`(go-\w+)|(\w+-go)`)
 )
+
+type ErrorInformator interface {
+	ErrorName(pkgInfo PkgInfo, errText string) string
+}
 
 func SubPackageName(pkgDir, baseDir string) string {
 	rel, err := filepath.Rel(baseDir, pkgDir)
@@ -35,16 +38,16 @@ func SubPackageName(pkgDir, baseDir string) string {
 	return rel
 }
 
-func AnalyzeFunctions(node *dst.File, pkgName, subPkg string, currentDir string, fileName string) []FunctionInfo {
+func AnalyzeFunctions(node *dst.File, pkgInfo PkgInfo, subPkg, currentDir, fileName string, ei ErrorInformator) []FunctionInfo {
 	var functions []FunctionInfo
 	imports := CollectImports(node)
 	originalPath := filepath.Join(currentDir, subPkg, fileName)
 
 	dst.Inspect(node, func(n dst.Node) bool {
 		if funcDecl, ok := n.(*dst.FuncDecl); ok && HasErrorReturn(funcDecl) {
-			f := CreateFunctionInfo(funcDecl, pkgName, subPkg, imports)
+			f := CreateFunctionInfo(funcDecl, pkgInfo.Name, subPkg, imports)
 			functions = append(functions, f)
-			ModifyFunctionBody(funcDecl, f)
+			ModifyFunctionBody(funcDecl, f, pkgInfo, ei)
 
 		}
 		return true
@@ -262,15 +265,11 @@ func GenerateErrorFile(pkgInfo PkgInfo, functions []FunctionInfo) {
 		}
 	}
 
-	var importsList []string
-	for _, imp := range imports {
-		importsList = append(importsList, imp.Alias+" "+`"`+imp.Path+`"`)
-	}
-	sort.Strings(importsList)
 	templateData := ErrorTemplate{Package: pkgInfo.Name, Functions: functions}
 	tmpl := `package {{.Package}}
+
 import (
-{{range .Imports}}{{.}}
+	{{range $k, $val := .Imports}} {{$val.Alias}} "{{$val.Path}}"
 {{end}})
 {{range .Functions}}
 
@@ -325,8 +324,8 @@ func (e *{{.FunctionName}}Error) Is(target error) bool {
 	data := struct {
 		Package   string
 		Functions []FunctionInfo
-		Imports   []string
-	}{Package: templateData.Package, Functions: templateData.Functions, Imports: importsList}
+		Imports   map[string]Path
+	}{Package: templateData.Package, Functions: templateData.Functions, Imports: imports}
 
 	errFilePath := filepath.Join(pkgInfo.Path, "errors.go")
 
@@ -369,7 +368,7 @@ func IsBasicType(typeName string) bool {
 	return basicTypes[strings.TrimPrefix(typeName, "*")]
 }
 
-func ModifyFunctionBody(funcDecl *dst.FuncDecl, info FunctionInfo) {
+func ModifyFunctionBody(funcDecl *dst.FuncDecl, info FunctionInfo, pkgInfo PkgInfo, ei ErrorInformator) {
 	parentMap := make(map[dst.Node]dst.Node)
 	dst.Inspect(funcDecl.Body, func(n dst.Node) bool {
 		if n == nil {
@@ -432,7 +431,8 @@ func ModifyFunctionBody(funcDecl *dst.FuncDecl, info FunctionInfo) {
 		errArg := IsErrorWrapper(result)
 		if errArg == nil {
 			if useNilError {
-				errArg = dst.NewIdent("nil")
+				errArg = dst.NewIdent(ei.ErrorName(pkgInfo, reason))
+				reason = "unknown error in " + info.FunctionName
 			} else {
 				errArg = result
 			}

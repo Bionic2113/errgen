@@ -1,8 +1,11 @@
 package collectr
 
 import (
+	"bytes"
 	"go/parser"
+	"go/printer"
 	"go/token"
+	"html/template"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -16,9 +19,7 @@ import (
 // При записи в файл проверяем, что file != nil,
 // Иначе нужно не обновлять, а создавать новый
 type ErrorInfo struct {
-	file         *dst.File
 	existsErrors map[string]string
-	newErrors    map[string]string
 }
 
 type ErrorCollector struct {
@@ -89,9 +90,7 @@ func (ec *ErrorCollector) CollectErrors(node *dst.File, pkgInfo utils.PkgInfo, c
 			einfo := ec.errorInfos[pkgInfo]
 			if einfo == nil {
 				einfo = &ErrorInfo{
-					file:         node,
 					existsErrors: make(map[string]string),
-					newErrors:    make(map[string]string),
 				}
 				ec.errorInfos[pkgInfo] = einfo
 			}
@@ -108,12 +107,11 @@ func (ec *ErrorCollector) ErrorName(pkgInfo utils.PkgInfo, errText string) strin
 	if einfo == nil {
 		einfo = &ErrorInfo{
 			existsErrors: make(map[string]string),
-			newErrors:    make(map[string]string),
 		}
 		ec.errorInfos[pkgInfo] = einfo
 
 		firstErr := generateErrorName(pkgInfo, "1")
-		einfo.newErrors[errText] = firstErr
+		einfo.existsErrors[errText] = firstErr
 
 		return firstErr
 	}
@@ -123,13 +121,8 @@ func (ec *ErrorCollector) ErrorName(pkgInfo utils.PkgInfo, errText string) strin
 		return name
 	}
 
-	name, ok = einfo.newErrors[errText]
-	if ok {
-		return name
-	}
-
-	nextErr := generateErrorName(pkgInfo, strconv.Itoa(len(einfo.existsErrors)+len(einfo.newErrors)))
-	einfo.newErrors[errText] = nextErr
+	nextErr := generateErrorName(pkgInfo, strconv.Itoa(len(einfo.existsErrors)+1))
+	einfo.existsErrors[errText] = nextErr
 
 	return nextErr
 }
@@ -140,16 +133,7 @@ func generateErrorName(pkgInfo utils.PkgInfo, suffix string) string {
 
 func (ec *ErrorCollector) GenerateFiles() error {
 	for pkgInfo, einfo := range ec.errorInfos {
-		if einfo.file == nil {
-			if err := ec.generateFile(pkgInfo, einfo); err != nil {
-				return err
-			}
-
-			continue
-		}
-
-		// TODO: А точно ли стоит делать апдейт, мб просто такая же генарация и всё
-		if err := ec.updateFile(pkgInfo.Path, einfo); err != nil {
+		if err := ec.generateFile(pkgInfo, einfo); err != nil {
 			return err
 		}
 	}
@@ -157,13 +141,55 @@ func (ec *ErrorCollector) GenerateFiles() error {
 	return nil
 }
 
-// TODO: дописать
 func (ec *ErrorCollector) generateFile(pkgInfo utils.PkgInfo, einfo *ErrorInfo) error {
-	return nil
-}
+	tmpl := `package {{.Package}}
+import "errors"
 
-// TODO: дописать
-func (ec *ErrorCollector) updateFile(path string, einfo *ErrorInfo) error {
-	path = filepath.Join(path, "error.go")
+var (
+	{{range $text, $name := .Errors}}
+	  {{$name}} = errors.New("{{$text}}") {{end}}
+	)
+`
+
+	data := struct {
+		Package string
+		Errors  map[string]string
+	}{Package: pkgInfo.Name, Errors: einfo.existsErrors}
+
+	errFilePath := filepath.Join(pkgInfo.Path, "error_gen.go")
+
+	f, err := os.Create(errFilePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	t, err := template.New("error_gen").Parse(tmpl)
+	if err != nil {
+		return err
+	}
+
+	formattedBuf := &bytes.Buffer{}
+	if err := t.Execute(formattedBuf, data); err != nil {
+		return err
+	}
+
+	cfg := printer.Config{Mode: printer.UseSpaces | printer.TabIndent, Tabwidth: 8}
+
+	fset := token.NewFileSet()
+	astFile, err := parser.ParseFile(fset, "", formattedBuf.String(), parser.ParseComments)
+	if err != nil {
+		return err
+	}
+
+	var buf bytes.Buffer
+	if err := cfg.Fprint(&buf, fset, astFile); err != nil {
+		return err
+	}
+
+	if err := os.WriteFile(errFilePath, buf.Bytes(), 0o644); err != nil {
+		return err
+	}
+
 	return nil
 }
