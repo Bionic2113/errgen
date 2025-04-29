@@ -1,6 +1,7 @@
 package example
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 )
@@ -12,21 +13,16 @@ type UpdateNameError struct {
 }
 
 func NewUpdateNameError(newName string, reason string, err error) *UpdateNameError {
-	if err == nil {
-		return nil
-	}
-
 	return &UpdateNameError{
 		newName: newName,
 		reason:  reason,
-
-		err: err,
+		err:     err,
 	}
 }
 
 func (e *UpdateNameError) Error() string {
 	return "[" +
-		"example/" +
+
 		"example" +
 		".User" +
 		"] - " +
@@ -46,9 +42,11 @@ func (e *UpdateNameError) Unwrap() error {
 	return e.err
 }
 
-func (e *UpdateNameError) Is(err error) bool {
-	_, ok := err.(*UpdateNameError)
-	return ok
+func (e *UpdateNameError) Is(target error) bool {
+	if _, ok := target.(*UpdateNameError); ok {
+		return true
+	}
+	return errors.Is(e.err, target)
 }
 
 type ProcessUserError struct {
@@ -59,22 +57,17 @@ type ProcessUserError struct {
 }
 
 func NewProcessUserError(user *User, count int, reason string, err error) *ProcessUserError {
-	if err == nil {
-		return nil
-	}
-
 	return &ProcessUserError{
 		user:   user,
 		count:  count,
 		reason: reason,
-
-		err: err,
+		err:    err,
 	}
 }
 
 func (e *ProcessUserError) Error() string {
 	return "[" +
-		"example/" +
+
 		"example" +
 
 		"] - " +
@@ -95,9 +88,11 @@ func (e *ProcessUserError) Unwrap() error {
 	return e.err
 }
 
-func (e *ProcessUserError) Is(err error) bool {
-	_, ok := err.(*ProcessUserError)
-	return ok
+func (e *ProcessUserError) Is(target error) bool {
+	if _, ok := target.(*ProcessUserError); ok {
+		return true
+	}
+	return errors.Is(e.err, target)
 }
 
 type IsOlderError struct {
@@ -108,22 +103,17 @@ type IsOlderError struct {
 }
 
 func NewIsOlderError(user *User, count int, reason string, err error) *IsOlderError {
-	if err == nil {
-		return nil
-	}
-
 	return &IsOlderError{
 		user:   user,
 		count:  count,
 		reason: reason,
-
-		err: err,
+		err:    err,
 	}
 }
 
 func (e *IsOlderError) Error() string {
 	return "[" +
-		"example/" +
+
 		"example" +
 		".User" +
 		"] - " +
@@ -144,9 +134,11 @@ func (e *IsOlderError) Unwrap() error {
 	return e.err
 }
 
-func (e *IsOlderError) Is(err error) bool {
-	_, ok := err.(*IsOlderError)
-	return ok
+func (e *IsOlderError) Is(target error) bool {
+	if _, ok := target.(*IsOlderError); ok {
+		return true
+	}
+	return errors.Is(e.err, target)
 }
 
 type IsYoungerError struct {
@@ -157,22 +149,17 @@ type IsYoungerError struct {
 }
 
 func NewIsYoungerError(user *User, count int, reason string, err error) *IsYoungerError {
-	if err == nil {
-		return nil
-	}
-
 	return &IsYoungerError{
 		user:   user,
 		count:  count,
 		reason: reason,
-
-		err: err,
+		err:    err,
 	}
 }
 
 func (e *IsYoungerError) Error() string {
 	return "[" +
-		"example/" +
+
 		"example" +
 		".User" +
 		"] - " +
@@ -193,9 +180,11 @@ func (e *IsYoungerError) Unwrap() error {
 	return e.err
 }
 
-func (e *IsYoungerError) Is(err error) bool {
-	_, ok := err.(*IsYoungerError)
-	return ok
+func (e *IsYoungerError) Is(target error) bool {
+	if _, ok := target.(*IsYoungerError); ok {
+		return true
+	}
+	return errors.Is(e.err, target)
 }
 
 type IsYoungerOrOlderError struct {
@@ -206,22 +195,17 @@ type IsYoungerOrOlderError struct {
 }
 
 func NewIsYoungerOrOlderError(user *User, count int, reason string, err error) *IsYoungerOrOlderError {
-	if err == nil {
-		return nil
-	}
-
 	return &IsYoungerOrOlderError{
 		user:   user,
 		count:  count,
 		reason: reason,
-
-		err: err,
+		err:    err,
 	}
 }
 
 func (e *IsYoungerOrOlderError) Error() string {
 	return "[" +
-		"example/" +
+
 		"example" +
 		".User" +
 		"] - " +
@@ -242,7 +226,9 @@ func (e *IsYoungerOrOlderError) Unwrap() error {
 	return e.err
 }
 
-func (e *IsYoungerOrOlderError) Is(err error) bool {
-	_, ok := err.(*IsYoungerOrOlderError)
-	return ok
+func (e *IsYoungerOrOlderError) Is(target error) bool {
+	if _, ok := target.(*IsYoungerOrOlderError); ok {
+		return true
+	}
+	return errors.Is(e.err, target)
 }

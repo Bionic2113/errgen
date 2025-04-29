@@ -159,23 +159,12 @@ func ErrorReturnIndex(funcDecl *dst.FuncDecl) int {
 
 	var totalIndex int
 	for _, result := range funcDecl.Type.Results.List {
-		// if len(result.Names) == 0 {
 		if ident, ok := result.Type.(*dst.Ident); ok {
 			if ident.Name == "error" {
 				return totalIndex
 			}
 		}
 		totalIndex++
-		// } else {
-		// 	for range result.Names {
-		// 		if ident, ok := result.Type.(*dst.Ident); ok {
-		// 			if ident.Name == "error" {
-		// 				return totalIndex
-		// 			}
-		// 		}
-		// 		totalIndex++
-		// 	}
-		// }
 	}
 	return -1
 }
@@ -187,43 +176,31 @@ func ExtractArgs(funcDecl *dst.FuncDecl) []ArgInfo {
 	}
 
 	for _, field := range funcDecl.Type.Params.List {
-		typeStr := ""
-		switch t := field.Type.(type) {
-		default:
-			typeStr = "any"
-		case *dst.Ident:
-			typeStr = t.Name
-		case *dst.StarExpr:
-			if ident, ok := t.X.(*dst.Ident); ok {
-				typeStr = "*" + ident.Name
-			} else if sel, ok := t.X.(*dst.SelectorExpr); ok {
-				if ident, ok := sel.X.(*dst.Ident); ok {
-					typeStr = "*" + ident.Name + "." + sel.Sel.Name
-				}
-			}
-		case *dst.ArrayType:
-			if ident, ok := t.Elt.(*dst.Ident); ok {
-				typeStr = "[]" + ident.Name
-			} else if sel, ok := t.Elt.(*dst.SelectorExpr); ok {
-				if ident, ok := sel.X.(*dst.Ident); ok {
-					typeStr = "[]" + ident.Name + "." + sel.Sel.Name
-				}
-			} else if t, ok := t.Elt.(*dst.StarExpr); ok {
-				if ident, ok := t.X.(*dst.Ident); ok {
-					typeStr = "[]*" + ident.Name
-				} else if sel, ok := t.X.(*dst.SelectorExpr); ok {
-					if ident, ok := sel.X.(*dst.Ident); ok {
-						typeStr = "[]*" + ident.Name + "." + sel.Sel.Name
-					}
-				}
-			}
-		case *dst.SelectorExpr:
-			if ident, ok := t.X.(*dst.Ident); ok {
-				typeStr = ident.Name + "." + t.Sel.Name
-			}
-		case *dst.InterfaceType:
-			typeStr = "any"
+		var typeStr string
+		expr := field.Type
+		if v, ok := expr.(*dst.ArrayType); ok {
+			typeStr = "[]"
+			expr = v.Elt
 		}
+
+		if v, ok := expr.(*dst.StarExpr); ok {
+			typeStr += "*"
+			expr = v.X
+		}
+
+		var suffix string
+		if v, ok := expr.(*dst.SelectorExpr); ok {
+			suffix = "." + v.Sel.Name
+			expr = v.Sel
+		}
+
+		if v, ok := expr.(*dst.Ident); ok {
+			typeStr += v.Name
+		} else {
+			typeStr += "any"
+		}
+
+		typeStr += suffix
 
 		for _, name := range field.Names {
 			args = append(args, ArgInfo{Name: name.Name, Type: typeStr})
@@ -318,7 +295,7 @@ func (e *{{.FunctionName}}Error) Is(target error) bool {
 		return true
 	}
 	return errors.Is(e.err, target)
-} 
+}
 {{end}}`
 
 	data := struct {
@@ -406,35 +383,30 @@ func ModifyFunctionBody(funcDecl *dst.FuncDecl, info FunctionInfo, pkgInfo PkgIn
 			return true
 		}
 
-		// if isErrorWrapper(result) {
-		// 	return true
-		// }
-
 		// Определяем сообщение об ошибке и нужно ли использовать nil
-		var reason string
-		var useNilError bool
+		reason := "unknown error in " + info.FunctionName
 
 		// Проверяем не создается ли ошибка напрямую
-		if msg, ok, useNil := ExtractErrorMessage(result); ok {
-			reason = msg
-			useNilError = useNil
+		msg, ok, useNilError := ExtractErrorMessage(result)
+		if !ok {
 			// Проверяем, не является ли ошибка результатом вызова функции
-		} else if msg, ok, funcLit := FindLastFunctionCall(returnStmt, parentMap); ok || funcLit {
+			var funcLit bool
+			msg, ok, funcLit = FindLastFunctionCall(returnStmt, parentMap)
 			if funcLit {
 				return true
 			}
+		}
+
+		if msg != "" {
 			reason = msg
-		} else {
-			reason = "unknown error in " + info.FunctionName
 		}
 
 		errArg := IsErrorWrapper(result)
 		if errArg == nil {
+			errArg = result
 			if useNilError {
 				errArg = dst.NewIdent(ei.ErrorName(pkgInfo, reason))
 				reason = "unknown error in " + info.FunctionName
-			} else {
-				errArg = result
 			}
 		}
 
@@ -519,10 +491,11 @@ func RemoveUnusedImports(node *dst.File) {
 		}
 	}
 	dst.Inspect(node, func(n dst.Node) bool {
-		switch x := n.(type) {
-		case *dst.SelectorExpr:
-
-			if ident, ok := x.X.(*dst.Ident); ok {
+		if callExpr, ok := n.(*dst.CallExpr); ok {
+			n = callExpr.Fun
+		}
+		if sel, ok := n.(*dst.SelectorExpr); ok {
+			if ident, ok := sel.X.(*dst.Ident); ok {
 				for path, imp := range imports {
 					pkgName := ""
 					if imp.Name != nil {
@@ -535,30 +508,14 @@ func RemoveUnusedImports(node *dst.File) {
 					}
 				}
 			}
-		case *dst.CallExpr:
-			if sel, ok := x.Fun.(*dst.SelectorExpr); ok {
-				if ident, ok := sel.X.(*dst.Ident); ok {
-					for path, imp := range imports {
-						pkgName := ""
-						if imp.Name != nil {
-							pkgName = imp.Name.Name
-						} else {
-							pkgName = NameFromPath(path)
-						}
-						if ident.Name == pkgName {
-							delete(imports, path)
-						}
-					}
-				}
-			}
 		}
 
 		return true
 	})
 
-	var newImports []dst.Spec
 	for _, imp := range node.Decls {
 		if genDecl, ok := imp.(*dst.GenDecl); ok && genDecl.Tok == token.IMPORT {
+			var newImports []dst.Spec
 			for _, spec := range genDecl.Specs {
 				if importSpec, ok := spec.(*dst.ImportSpec); ok {
 					path := strings.Trim(importSpec.Path.Value, `"`)
@@ -567,23 +524,21 @@ func RemoveUnusedImports(node *dst.File) {
 					}
 				}
 			}
-			if len(newImports) > 0 {
-				genDecl.Specs = newImports
-			} else {
-				genDecl.Specs = nil
-			}
+			genDecl.Specs = newImports
 		}
 	}
 
+	// Мало ли у кого-то в нескольких импортах находится,
+	// поэтому снова в цикле проходим и пропускаем пустые
 	var newDecls []dst.Decl
 	for _, decl := range node.Decls {
 		if genDecl, ok := decl.(*dst.GenDecl); ok && genDecl.Tok == token.IMPORT {
 			if len(genDecl.Specs) > 0 {
 				newDecls = append(newDecls, decl)
 			}
-		} else {
-			newDecls = append(newDecls, decl)
+			continue
 		}
+		newDecls = append(newDecls, decl)
 	}
 
 	node.Decls = newDecls
@@ -591,37 +546,38 @@ func RemoveUnusedImports(node *dst.File) {
 
 // TODO: refactor
 func ExtractErrorMessage(expr dst.Expr) (string, bool, bool) {
-	switch v := expr.(type) {
-	case *dst.CallExpr:
-		if sel, ok := v.Fun.(*dst.SelectorExpr); ok {
-			if ident, ok := sel.X.(*dst.Ident); ok {
-				if (ident.Name == "errors" && sel.Sel.Name == "New") || (ident.Name == "fmt" && (sel.Sel.Name == "Errorf")) {
-					if len(v.Args) > 0 {
-						if lit, ok := v.Args[0].(*dst.BasicLit); ok {
-							return strings.Trim(lit.Value, `"`), true, true
-						}
-
-						var buf bytes.Buffer
-						printer.Fprint(&buf, token.NewFileSet(), v.Args[0])
-
-						return buf.String(), true, true
+	callExpr, ok := expr.(*dst.CallExpr)
+	if !ok {
+		return "", false, false
+	}
+	if sel, ok := callExpr.Fun.(*dst.SelectorExpr); ok {
+		if ident, ok := sel.X.(*dst.Ident); ok {
+			if (ident.Name == "errors" && sel.Sel.Name == "New") || (ident.Name == "fmt" && (sel.Sel.Name == "Errorf")) {
+				if len(callExpr.Args) > 0 {
+					if lit, ok := callExpr.Args[0].(*dst.BasicLit); ok {
+						return strings.Trim(lit.Value, `"`), true, true
 					}
-				}
 
-				return ident.Name + "." + sel.Sel.Name, true, false
-			}
+					var buf bytes.Buffer
+					printer.Fprint(&buf, token.NewFileSet(), callExpr.Args[0])
 
-			return sel.Sel.Name, true, false
-		} else if ident, ok := v.Fun.(*dst.Ident); ok {
-			// Если уже была обертка, то забираем причину
-			if strings.HasSuffix(ident.Name, "Error") && len(v.Args) > 1 {
-				if lit, ok := v.Args[len(v.Args)-2].(*dst.BasicLit); ok {
-					return strings.Trim(lit.Value, `"`), true, false
+					return buf.String(), true, true
 				}
 			}
 
-			return ident.Name, true, false
+			return ident.Name + "." + sel.Sel.Name, true, false
 		}
+
+		return sel.Sel.Name, true, false
+	} else if ident, ok := callExpr.Fun.(*dst.Ident); ok {
+		// Если уже была обертка, то забираем причину
+		if strings.HasSuffix(ident.Name, "Error") && len(callExpr.Args) > 1 {
+			if lit, ok := callExpr.Args[len(callExpr.Args)-2].(*dst.BasicLit); ok {
+				return strings.Trim(lit.Value, `"`), true, false
+			}
+		}
+
+		return ident.Name, true, false
 	}
 
 	return "", false, false
@@ -639,7 +595,7 @@ func FindLastFunctionCall(node dst.Node, parentMap map[dst.Node]dst.Node) (strin
 			return "", false, true
 		case *dst.AssignStmt:
 			assignStmt = stmt
-		case *dst.IfStmt:
+		case *dst.IfStmt: // TODO: refactor
 			a, ok := stmt.Init.(*dst.AssignStmt)
 			if !ok {
 				p := parentMap[stmt]
@@ -675,26 +631,9 @@ func FindLastFunctionCall(node dst.Node, parentMap map[dst.Node]dst.Node) (strin
 
 		}
 
-		index := -1
-		for i, field := range assignStmt.Lhs {
-			f, ok := field.(*dst.Ident)
-			if !ok {
-				continue
-			}
-			if strings.HasPrefix(f.Name, "err") ||
-				strings.HasSuffix(f.Name, "err") ||
-				strings.HasSuffix(f.Name, "Err") {
-				index = i
-				break
-			}
-		}
-		if index < 0 {
-			parent = parentMap[parent]
+		rhs := Rhs(assignStmt, func() { parent = parentMap[parent] })
+		if rhs == nil {
 			continue
-		}
-		rhs := assignStmt.Rhs[0]
-		if len(assignStmt.Rhs) > 1 {
-			rhs = assignStmt.Rhs[index]
 		}
 
 		return Reason(rhs), true, false
@@ -723,27 +662,10 @@ func BlockStmt(stmt *dst.BlockStmt) *dst.AssignStmt {
 		if !ok {
 			continue
 		}
-		index := -1
-		for i, field := range assignStmt.Lhs {
-			f, ok := field.(*dst.Ident)
-			if !ok {
-				continue
-			}
-			if strings.HasPrefix(f.Name, "err") ||
-				strings.HasSuffix(f.Name, "err") ||
-				strings.HasSuffix(f.Name, "Err") {
-				index = i
-				break
-			}
-		}
-		if index < 0 {
+		rhs := Rhs(assignStmt, nil)
+		if rhs == nil {
 			continue
 		}
-		rhs := assignStmt.Rhs[0]
-		if len(assignStmt.Rhs) > 1 {
-			rhs = assignStmt.Rhs[index]
-		}
-		// Да, всё это выглядит убого. Потом перепишу.
 		// Здесь пропускаем errors.Join, тк странно такую причину указывать.
 		// Поищем повыше
 		if call, ok := rhs.(*dst.CallExpr); ok {
@@ -760,4 +682,32 @@ func BlockStmt(stmt *dst.BlockStmt) *dst.AssignStmt {
 	}
 
 	return nil
+}
+
+func Rhs(assignStmt *dst.AssignStmt, changeParent func()) dst.Expr {
+	index := -1
+	for i, field := range assignStmt.Lhs {
+		f, ok := field.(*dst.Ident)
+		if !ok {
+			continue
+		}
+		if strings.HasPrefix(f.Name, "err") ||
+			strings.HasSuffix(f.Name, "err") ||
+			strings.HasSuffix(f.Name, "Err") {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		if changeParent != nil {
+			changeParent()
+		}
+
+		return nil
+	}
+	rhs := assignStmt.Rhs[0]
+	if len(assignStmt.Rhs) > 1 {
+		rhs = assignStmt.Rhs[index]
+	}
+	return rhs
 }
