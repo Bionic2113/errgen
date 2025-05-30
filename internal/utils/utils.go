@@ -153,14 +153,24 @@ func HasErrorReturn(funcDecl *dst.FuncDecl) bool {
 	return false
 }
 
-func ErrorReturnIndex(funcDecl *dst.FuncDecl) int {
-	if funcDecl.Type.Results == nil {
+func ErrorReturnIndex(funcNode dst.Node) int {
+	funcLit := &dst.FuncLit{}
+	switch val := funcNode.(type) {
+	default:
+		return -1
+	case *dst.FuncLit:
+		funcLit.Type = val.Type
+	case *dst.FuncDecl:
+		funcLit.Type = val.Type
+	}
+
+	if funcLit.Type.Results == nil {
 		return -1
 	}
 
 	var totalIndex int
-	for _, result := range funcDecl.Type.Results.List {
-		if ident, ok := result.Type.(*dst.Ident); ok {
+	for _, field := range funcLit.Type.Results.List {
+		if ident, ok := field.Type.(*dst.Ident); ok {
 			if ident.Name == "error" {
 				return totalIndex
 			}
@@ -376,6 +386,19 @@ func ModifyFunctionBody(funcDecl *dst.FuncDecl, info FunctionInfo, pkgInfo PkgIn
 	}
 
 	dst.Inspect(funcDecl.Body, func(n dst.Node) bool {
+		// For anonymous functions
+		// TODO: need refactor
+		errorIndex = func() int {
+			funcLit, ok := n.(*dst.FuncLit)
+			if !ok {
+				return errorIndex
+			}
+			return ErrorReturnIndex(funcLit)
+		}()
+		if errorIndex == -1 {
+			return false
+		}
+
 		returnStmt, ok := n.(*dst.ReturnStmt)
 		if !ok || errorIndex >= len(returnStmt.Results) {
 			return true

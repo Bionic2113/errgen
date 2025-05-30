@@ -6,6 +6,150 @@ import (
 	"strconv"
 )
 
+type WithAnonError struct {
+	reason string
+	err    error
+}
+
+func NewWithAnonError(reason string, err error) *WithAnonError {
+	return &WithAnonError{
+		reason: reason,
+		err:    err,
+	}
+}
+
+func (e *WithAnonError) Error() string {
+	return "[" +
+
+		"example" +
+
+		"] - " +
+		"WithAnon - " +
+		e.reason +
+
+		"\n" +
+		e.err.Error()
+}
+
+func (e *WithAnonError) Unwrap() error {
+	return e.err
+}
+
+func (e *WithAnonError) Is(target error) bool {
+	if _, ok := target.(*WithAnonError); ok {
+		return true
+	}
+	return errors.Is(e.err, target)
+}
+
+type WithAnon_2Error struct {
+	reason string
+	err    error
+}
+
+func NewWithAnon_2Error(reason string, err error) *WithAnon_2Error {
+	return &WithAnon_2Error{
+		reason: reason,
+		err:    err,
+	}
+}
+
+func (e *WithAnon_2Error) Error() string {
+	return "[" +
+
+		"example" +
+
+		"] - " +
+		"WithAnon_2 - " +
+		e.reason +
+
+		"\n" +
+		e.err.Error()
+}
+
+func (e *WithAnon_2Error) Unwrap() error {
+	return e.err
+}
+
+func (e *WithAnon_2Error) Is(target error) bool {
+	if _, ok := target.(*WithAnon_2Error); ok {
+		return true
+	}
+	return errors.Is(e.err, target)
+}
+
+type WithAnon_3Error struct {
+	reason string
+	err    error
+}
+
+func NewWithAnon_3Error(reason string, err error) *WithAnon_3Error {
+	return &WithAnon_3Error{
+		reason: reason,
+		err:    err,
+	}
+}
+
+func (e *WithAnon_3Error) Error() string {
+	return "[" +
+
+		"example" +
+
+		"] - " +
+		"WithAnon_3 - " +
+		e.reason +
+
+		"\n" +
+		e.err.Error()
+}
+
+func (e *WithAnon_3Error) Unwrap() error {
+	return e.err
+}
+
+func (e *WithAnon_3Error) Is(target error) bool {
+	if _, ok := target.(*WithAnon_3Error); ok {
+		return true
+	}
+	return errors.Is(e.err, target)
+}
+
+type MarshalError struct {
+	reason string
+	err    error
+}
+
+func NewMarshalError(reason string, err error) *MarshalError {
+	return &MarshalError{
+		reason: reason,
+		err:    err,
+	}
+}
+
+func (e *MarshalError) Error() string {
+	return "[" +
+
+		"example" +
+
+		"] - " +
+		"Marshal - " +
+		e.reason +
+
+		"\n" +
+		e.err.Error()
+}
+
+func (e *MarshalError) Unwrap() error {
+	return e.err
+}
+
+func (e *MarshalError) Is(target error) bool {
+	if _, ok := target.(*MarshalError); ok {
+		return true
+	}
+	return errors.Is(e.err, target)
+}
+
 type UpdateNameError struct {
 	newName string
 	reason  string
