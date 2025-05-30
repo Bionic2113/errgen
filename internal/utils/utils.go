@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/Bionic2113/errgen/pkg/skipper"
 	"github.com/dave/dst"
 	"github.com/dave/dst/decorator"
 )
@@ -45,7 +46,7 @@ func AnalyzeFunctions(node *dst.File, pkgInfo PkgInfo, subPkg, currentDir, fileN
 
 	dst.Inspect(node, func(n dst.Node) bool {
 		if funcDecl, ok := n.(*dst.FuncDecl); ok && HasErrorReturn(funcDecl) {
-			f := CreateFunctionInfo(funcDecl, pkgInfo.Name, subPkg, imports)
+			f := CreateFunctionInfo(funcDecl, pkgInfo, subPkg, imports)
 			functions = append(functions, f)
 			ModifyFunctionBody(funcDecl, f, pkgInfo, ei)
 
@@ -102,11 +103,11 @@ func NameFromPath(path string) string {
 	return strings.TrimPrefix(name, "go-")
 }
 
-func CreateFunctionInfo(funcDecl *dst.FuncDecl, pkgName, subPkg string, imports map[string]Path) FunctionInfo {
-	args := ExtractArgs(funcDecl)
+func CreateFunctionInfo(funcDecl *dst.FuncDecl, pkgInfo PkgInfo, subPkg string, imports map[string]Path) FunctionInfo {
+	args := ExtractArgs(funcDecl, pkgInfo.Path, imports)
 	receiverType := ExtractReceiverType(funcDecl)
 
-	return FunctionInfo{PackageName: pkgName, SubPackageName: subPkg, FunctionName: funcDecl.Name.Name, ReceiverType: receiverType, Args: args, Imports: imports, HasError: true}
+	return FunctionInfo{PackageName: pkgInfo.Name, SubPackageName: subPkg, FunctionName: funcDecl.Name.Name, ReceiverType: receiverType, Args: args, Imports: imports, HasError: true}
 }
 
 func ExtractReceiverType(funcDecl *dst.FuncDecl) string {
@@ -169,7 +170,7 @@ func ErrorReturnIndex(funcDecl *dst.FuncDecl) int {
 	return -1
 }
 
-func ExtractArgs(funcDecl *dst.FuncDecl) []ArgInfo {
+func ExtractArgs(funcDecl *dst.FuncDecl, path string, imports map[string]Path) []ArgInfo {
 	var args []ArgInfo
 	if funcDecl.Type.Params == nil {
 		return args
@@ -188,19 +189,25 @@ func ExtractArgs(funcDecl *dst.FuncDecl) []ArgInfo {
 			expr = v.X
 		}
 
-		var suffix string
+		var isSelector bool
 		if v, ok := expr.(*dst.SelectorExpr); ok {
-			suffix = "." + v.Sel.Name
+			pkg := v.X.(*dst.Ident).Name
+			if skipper.NeedSkip(v.Sel.Name, imports[pkg].Path) {
+				continue
+			}
+			typeStr += pkg + "."
 			expr = v.Sel
+			isSelector = true
 		}
 
 		if v, ok := expr.(*dst.Ident); ok {
+			if !isSelector && skipper.NeedSkip(v.Name, skipper.ModuleName(path)) {
+				continue
+			}
 			typeStr += v.Name
 		} else {
 			typeStr += "any"
 		}
-
-		typeStr += suffix
 
 		for _, name := range field.Names {
 			args = append(args, ArgInfo{Name: name.Name, Type: typeStr})
@@ -413,7 +420,7 @@ func ModifyFunctionBody(funcDecl *dst.FuncDecl, info FunctionInfo, pkgInfo PkgIn
 		constructorCall := &dst.CallExpr{
 			Fun: dst.NewIdent("New" + info.FunctionName + "Error"),
 			Args: append(
-				ArgumentNames(funcDecl),
+				ArgumentNames(funcDecl, info.Args),
 				dst.NewIdent("\""+reason+"\""),
 				errArg,
 			),
@@ -456,17 +463,13 @@ func IsNeedChange(expr dst.Expr) bool {
 	return false
 }
 
-func ArgumentNames(funcDecl *dst.FuncDecl) []dst.Expr {
-	var args []dst.Expr
-	if funcDecl.Type.Params != nil {
-		for _, field := range funcDecl.Type.Params.List {
-			for _, name := range field.Names {
-				args = append(args, dst.NewIdent(name.Name))
-			}
-		}
+func ArgumentNames(funcDecl *dst.FuncDecl, args []ArgInfo) []dst.Expr {
+	result := make([]dst.Expr, len(args))
+	for i, v := range args {
+		result[i] = dst.NewIdent(v.Name)
 	}
 
-	return args
+	return result
 }
 
 func IsErrorWrapper(expr dst.Expr) dst.Expr {

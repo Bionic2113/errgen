@@ -1,8 +1,12 @@
 package example
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
+	"sync"
+
+	"github.com/Bionic2113/errgen/pkg/skipper"
 )
 
 // First comment
@@ -35,7 +39,7 @@ func (u *User) IsOlder(user *User, count int) (bool, error) {
 	if user == nil {
 		return false, errors.New("user is nil")
 	}
-	// Third comment 
+	// Third comment
 	if u == nil {
 		return false, errors.New("current user is nil")
 	}
@@ -58,7 +62,7 @@ func (u *User) IsYounger(user *User, count int) (error, bool) {
 	return nil, false
 }
 
-// Last commnent 
+// Last commnent
 func (u *User) IsYoungerOrOlder(user *User, count int) (bool, bool, error) {
 	if user == nil {
 		return false, false, fmt.Errorf("user is nil")
@@ -73,4 +77,30 @@ func (u *User) IsYoungerOrOlder(user *User, count int) (bool, bool, error) {
 		return false, true, nil
 	}
 	return false, false, nil
+}
+
+// With DB banned
+func (u *User) FindName(db *sql.DB, name string) (string, error) {
+	if u == nil {
+		return "", errors.New("user is nil")
+	}
+
+	return u.Name, nil
+}
+
+// With sync banned
+func (u *User) Lock(mx *sync.Mutex, name string) (string, error) {
+	if u == nil {
+		return "", errors.New("user is nil")
+	}
+
+	return u.Name, nil
+}
+
+// With config banned
+func (u *User) CheckConfig(cfg skipper.Config, nothing any) error {
+	if u == nil {
+		return errors.New("user is nil")
+	}
+	return nil
 }

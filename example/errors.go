@@ -232,3 +232,132 @@ func (e *IsYoungerOrOlderError) Is(target error) bool {
 	}
 	return errors.Is(e.err, target)
 }
+
+type FindNameError struct {
+	name   string
+	reason string
+	err    error
+}
+
+func NewFindNameError(name string, reason string, err error) *FindNameError {
+	return &FindNameError{
+		name:   name,
+		reason: reason,
+		err:    err,
+	}
+}
+
+func (e *FindNameError) Error() string {
+	return "[" +
+
+		"example" +
+		".User" +
+		"] - " +
+		"FindName - " +
+		e.reason +
+
+		" - args: {" +
+
+		"name: " + e.name +
+		"}" +
+
+		"\n" +
+		e.err.Error()
+}
+
+func (e *FindNameError) Unwrap() error {
+	return e.err
+}
+
+func (e *FindNameError) Is(target error) bool {
+	if _, ok := target.(*FindNameError); ok {
+		return true
+	}
+	return errors.Is(e.err, target)
+}
+
+type LockError struct {
+	name   string
+	reason string
+	err    error
+}
+
+func NewLockError(name string, reason string, err error) *LockError {
+	return &LockError{
+		name:   name,
+		reason: reason,
+		err:    err,
+	}
+}
+
+func (e *LockError) Error() string {
+	return "[" +
+
+		"example" +
+		".User" +
+		"] - " +
+		"Lock - " +
+		e.reason +
+
+		" - args: {" +
+
+		"name: " + e.name +
+		"}" +
+
+		"\n" +
+		e.err.Error()
+}
+
+func (e *LockError) Unwrap() error {
+	return e.err
+}
+
+func (e *LockError) Is(target error) bool {
+	if _, ok := target.(*LockError); ok {
+		return true
+	}
+	return errors.Is(e.err, target)
+}
+
+type CheckConfigError struct {
+	nothing any
+	reason  string
+	err     error
+}
+
+func NewCheckConfigError(nothing any, reason string, err error) *CheckConfigError {
+	return &CheckConfigError{
+		nothing: nothing,
+		reason:  reason,
+		err:     err,
+	}
+}
+
+func (e *CheckConfigError) Error() string {
+	return "[" +
+
+		"example" +
+		".User" +
+		"] - " +
+		"CheckConfig - " +
+		e.reason +
+
+		" - args: {" +
+
+		"nothing: " + fmt.Sprintf("%#v", e.nothing) +
+		"}" +
+
+		"\n" +
+		e.err.Error()
+}
+
+func (e *CheckConfigError) Unwrap() error {
+	return e.err
+}
+
+func (e *CheckConfigError) Is(target error) bool {
+	if _, ok := target.(*CheckConfigError); ok {
+		return true
+	}
+	return errors.Is(e.err, target)
+}

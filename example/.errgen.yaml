@@ -1,0 +1,5 @@
+skip_types:
+  "github.com/Bionic2113/errgen/pkg/skipper":
+    all: false
+    names:
+      - "Config"

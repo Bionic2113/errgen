@@ -1,6 +1,8 @@
 package main
 
-import "github.com/Bionic2113/errgen/internal/prcs"
+import (
+	"github.com/Bionic2113/errgen/internal/prcs"
+)
 
 func main() {
 	processor, err := prcs.New()
