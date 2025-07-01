@@ -18,6 +18,8 @@ var banned = map[string]pkgInfo{
 }
 var workDir, module string
 
+var stringerConfig Stringer
+
 // TODO: Maybe it's better to remove init() and make a simple structure and constructor.
 func init() {
 	workDir, module = workDirAndModule()
@@ -42,6 +44,7 @@ func init() {
 	}
 
 	banned = cfg.SkipTypes
+	stringerConfig = cfg.Stringer
 }
 
 func NeedSkip(name, path string) bool {
@@ -55,4 +58,8 @@ func NeedSkip(name, path string) bool {
 	}
 
 	return slices.Contains(info.Names, name)
+}
+
+func StringerConfig() Stringer {
+	return stringerConfig
 }

@@ -16,11 +16,6 @@ type ArgInfo struct {
 	Type string
 }
 
-type ErrorTemplate struct {
-	Package   string
-	Functions []FunctionInfo
-}
-
 type PkgInfo struct {
 	Name string
 	Path string

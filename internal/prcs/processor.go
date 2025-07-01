@@ -7,24 +7,32 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Bionic2113/errgen/internal/collectr"
-	"github.com/Bionic2113/errgen/internal/utils"
+	"github.com/Bionic2113/errgen/internal/collector"
+	"github.com/Bionic2113/errgen/internal/generator"
+	"github.com/Bionic2113/errgen/pkg/utils"
+	"github.com/dave/dst"
 	"github.com/dave/dst/decorator"
 )
 
 type FileProcessor struct {
 	packages   map[utils.PkgInfo][]utils.FunctionInfo
 	currentDir string
-	collector  *collectr.ErrorCollector
+	collector  *collector.ErrorCollector
+	stringer   Stringer
 }
 
-func New() (*FileProcessor, error) {
+type Stringer interface {
+	MakeStringFuncs(pkgInfo utils.PkgInfo, scope *dst.Scope)
+	GenerateFiles() error
+}
+
+func New(st Stringer) (*FileProcessor, error) {
 	currentDir, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
 
-	c, err := collectr.New()
+	c, err := collector.New()
 	if err != nil {
 		return nil, err
 	}
@@ -33,6 +41,7 @@ func New() (*FileProcessor, error) {
 		currentDir: currentDir,
 		packages:   make(map[utils.PkgInfo][]utils.FunctionInfo),
 		collector:  c,
+		stringer:   st,
 	}, nil
 }
 
@@ -71,9 +80,11 @@ func (p *FileProcessor) ProcessFile(path string) error {
 		return nil
 	}
 
+	p.stringer.MakeStringFuncs(pkgInfo, node.Scope)
+
 	subPkg := utils.SubPackageName(pkgInfo.Path, p.currentDir)
 	fileName := filepath.Base(path)
-	functions := utils.AnalyzeFunctions(node, pkgInfo, subPkg, p.currentDir, fileName, p.collector)
+	functions := generator.AnalyzeFunctions(node, pkgInfo, subPkg, p.currentDir, fileName, p.collector)
 	if len(functions) > 0 {
 		p.packages[pkgInfo] = append(p.packages[pkgInfo], functions...)
 	}
@@ -85,7 +96,12 @@ func (p *FileProcessor) GenerateErrorFiles() {
 	if err := p.collector.GenerateFiles(); err != nil {
 		panic("[FileProcessor] - GenerateErrorFiles - collector.GenerateFiles: " + err.Error())
 	}
+
+	if err := p.stringer.GenerateFiles(); err != nil {
+		panic("[FileProcessor] - GenerateErrorFiles - stringer.GenerateFiles: " + err.Error())
+	}
+
 	for pkg, functions := range p.packages {
-		utils.GenerateErrorFile(pkg, functions)
+		generator.GenerateErrorFile(pkg, functions)
 	}
 }

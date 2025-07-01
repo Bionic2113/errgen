@@ -1,4 +1,4 @@
-package utils
+package generator
 
 import (
 	"bytes"
@@ -9,132 +9,42 @@ import (
 	"html/template"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
-	"github.com/Bionic2113/errgen/pkg/skipper"
+	"github.com/Bionic2113/errgen/pkg/utils"
 	"github.com/dave/dst"
-	"github.com/dave/dst/decorator"
-)
-
-var (
-	versionMatch         *regexp.Regexp = regexp.MustCompile(`^(/?\w+(\.?|-?))+(/v\d+)$`)
-	prefixAndSuffixMatch *regexp.Regexp = regexp.MustCompile(`(go-\w+)|(\w+-go)`)
 )
 
 type ErrorInformator interface {
-	ErrorName(pkgInfo PkgInfo, errText string) string
+	ErrorName(pkgInfo utils.PkgInfo, errText string) string
 }
 
-func SubPackageName(pkgDir, baseDir string) string {
-	rel, err := filepath.Rel(baseDir, pkgDir)
-	if err != nil {
-		return ""
-	}
-
-	if rel == "." {
-		return ""
-	}
-
-	return rel
-}
-
-func AnalyzeFunctions(node *dst.File, pkgInfo PkgInfo, subPkg, currentDir, fileName string, ei ErrorInformator) []FunctionInfo {
-	var functions []FunctionInfo
-	imports := CollectImports(node)
+func AnalyzeFunctions(
+	node *dst.File,
+	pkgInfo utils.PkgInfo,
+	subPkg, currentDir, fileName string,
+	errInformator ErrorInformator,
+) []utils.FunctionInfo {
+	var functions []utils.FunctionInfo
+	imports := utils.CollectImports(node)
 	originalPath := filepath.Join(currentDir, subPkg, fileName)
 
 	dst.Inspect(node, func(n dst.Node) bool {
 		if funcDecl, ok := n.(*dst.FuncDecl); ok && HasErrorReturn(funcDecl) {
-			f := CreateFunctionInfo(funcDecl, pkgInfo, subPkg, imports)
+			f := utils.CreateFunctionInfo(funcDecl, pkgInfo, subPkg, imports)
 			functions = append(functions, f)
-			ModifyFunctionBody(funcDecl, f, pkgInfo, ei)
+			ModifyFunctionBody(funcDecl, f, pkgInfo, errInformator)
 
 		}
 		return true
 	})
 
 	if len(functions) > 0 {
-		RemoveUnusedImports(node)
-		WriteModifiedFile(node, originalPath)
+		utils.RemoveUnusedImports(node)
+		utils.WriteModifiedFile(node, originalPath)
 	}
 
 	return functions
-}
-
-func CollectImports(node *dst.File) map[string]Path {
-	imports := make(map[string]Path)
-	for _, imp := range node.Imports {
-		if imp.Path == nil {
-			continue
-		}
-		path := strings.Trim(imp.Path.Value, `"`)
-
-		if imp.Name != nil {
-			imports[imp.Name.Name] = Path{Alias: imp.Name.Name, Path: path}
-			continue
-		}
-
-		imports[NameFromPath(path)] = Path{Path: path}
-	}
-
-	return imports
-}
-
-func NameFromPath(path string) string {
-	// Удаляем версии пакетов, если есть
-	matches := versionMatch.FindStringSubmatch(path)
-	if len(matches) > 0 {
-		path = strings.ReplaceAll(path, matches[len(matches)-1], "")
-	}
-
-	name := filepath.Base(path)
-
-	// Удаляем префикс или суффикс go
-	matches = prefixAndSuffixMatch.FindStringSubmatch(name)
-	if len(matches) == 0 {
-		return name
-	}
-
-	if matches[1] == "" {
-		return strings.TrimSuffix(name, "-go")
-	}
-
-	return strings.TrimPrefix(name, "go-")
-}
-
-func CreateFunctionInfo(funcDecl *dst.FuncDecl, pkgInfo PkgInfo, subPkg string, imports map[string]Path) FunctionInfo {
-	args := ExtractArgs(funcDecl, pkgInfo.Path, imports)
-	receiverType := ExtractReceiverType(funcDecl)
-
-	return FunctionInfo{PackageName: pkgInfo.Name, SubPackageName: subPkg, FunctionName: funcDecl.Name.Name, ReceiverType: receiverType, Args: args, Imports: imports, HasError: true}
-}
-
-func ExtractReceiverType(funcDecl *dst.FuncDecl) string {
-	if funcDecl.Recv == nil || len(funcDecl.Recv.List) == 0 {
-		return ""
-	}
-
-	if starExpr, ok := funcDecl.Recv.List[0].Type.(*dst.StarExpr); ok {
-		if ident, ok := starExpr.X.(*dst.Ident); ok {
-			return ident.Name
-		}
-	} else if ident, ok := funcDecl.Recv.List[0].Type.(*dst.Ident); ok {
-		return ident.Name
-	}
-
-	return ""
-}
-
-func WriteModifiedFile(node *dst.File, path string) {
-	var buf bytes.Buffer
-	if err := decorator.Fprint(&buf, node); err != nil {
-		fmt.Printf("Error formatting modified file: %v\n", err)
-	}
-
-	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
-		fmt.Printf("Error writing modified file: %v\n", err)
-	}
 }
 
 func HasErrorReturn(funcDecl *dst.FuncDecl) bool {
@@ -180,72 +90,26 @@ func ErrorReturnIndex(funcNode dst.Node) int {
 	return -1
 }
 
-func ExtractArgs(funcDecl *dst.FuncDecl, path string, imports map[string]Path) []ArgInfo {
-	var args []ArgInfo
-	if funcDecl.Type.Params == nil {
-		return args
-	}
-
-	for _, field := range funcDecl.Type.Params.List {
-		var typeStr string
-		expr := field.Type
-		if v, ok := expr.(*dst.ArrayType); ok {
-			typeStr = "[]"
-			expr = v.Elt
-		}
-
-		if v, ok := expr.(*dst.StarExpr); ok {
-			typeStr += "*"
-			expr = v.X
-		}
-
-		var isSelector bool
-		if v, ok := expr.(*dst.SelectorExpr); ok {
-			pkg := v.X.(*dst.Ident).Name
-			if skipper.NeedSkip(v.Sel.Name, imports[pkg].Path) {
-				continue
-			}
-			typeStr += pkg + "."
-			expr = v.Sel
-			isSelector = true
-		}
-
-		if v, ok := expr.(*dst.Ident); ok {
-			if !isSelector && skipper.NeedSkip(v.Name, skipper.ModuleName(path)) {
-				continue
-			}
-			typeStr += v.Name
-		} else {
-			typeStr += "any"
-		}
-
-		for _, name := range field.Names {
-			args = append(args, ArgInfo{Name: name.Name, Type: typeStr})
-		}
-	}
-	return args
-}
-
-func GenerateErrorFile(pkgInfo PkgInfo, functions []FunctionInfo) {
-	imports := map[string]Path{"errors": {Path: "errors"}}
+func GenerateErrorFile(pkgInfo utils.PkgInfo, functions []utils.FunctionInfo) {
+	imports := map[string]utils.Path{"errors": {Path: "errors"}}
 	for _, f := range functions {
 		for _, arg := range f.Args {
 
 			switch {
 			case strings.HasPrefix(arg.Type, "time."):
-				imports["time"] = Path{Path: "time"}
+				imports["time"] = utils.Path{Path: "time"}
 
 			case arg.Type == "int" || arg.Type == "int64" || arg.Type == "uint64":
-				imports["strconv"] = Path{Path: "strconv"}
+				imports["strconv"] = utils.Path{Path: "strconv"}
 			case arg.Type == "float64":
-				imports["strconv"] = Path{Path: "strconv"}
+				imports["strconv"] = utils.Path{Path: "strconv"}
 
 			case arg.Type == "bool":
-				imports["strconv"] = Path{Path: "strconv"}
+				imports["strconv"] = utils.Path{Path: "strconv"}
 			case arg.Type == "any" || strings.Contains(arg.Type, "[]"):
-				imports["fmt"] = Path{Path: "fmt"}
-			case !IsBasicType(arg.Type):
-				imports["fmt"] = Path{Path: "fmt"}
+				imports["fmt"] = utils.Path{Path: "fmt"}
+			case !utils.IsBasicType(arg.Type):
+				imports["fmt"] = utils.Path{Path: "fmt"}
 			}
 			if strings.Contains(arg.Type, ".") {
 				parts := strings.SplitN(arg.Type, ".", 2)
@@ -317,8 +181,8 @@ func (e *{{.FunctionName}}Error) Is(target error) bool {
 
 	data := struct {
 		Package   string
-		Functions []FunctionInfo
-		Imports   map[string]Path
+		Functions []utils.FunctionInfo
+		Imports   map[string]utils.Path
 	}{Package: templateData.Package, Functions: templateData.Functions, Imports: imports}
 
 	errFilePath := filepath.Join(pkgInfo.Path, "errors.go")
@@ -357,12 +221,12 @@ func (e *{{.FunctionName}}Error) Is(target error) bool {
 	}
 }
 
-func IsBasicType(typeName string) bool {
-	basicTypes := map[string]bool{"string": true, "int": true, "int64": true, "uint64": true, "float64": true, "bool": true, "any": true}
-	return basicTypes[strings.TrimPrefix(typeName, "*")]
-}
-
-func ModifyFunctionBody(funcDecl *dst.FuncDecl, info FunctionInfo, pkgInfo PkgInfo, ei ErrorInformator) {
+func ModifyFunctionBody(
+	funcDecl *dst.FuncDecl,
+	info utils.FunctionInfo,
+	pkgInfo utils.PkgInfo,
+	errInformator ErrorInformator,
+) {
 	parentMap := make(map[dst.Node]dst.Node)
 	dst.Inspect(funcDecl.Body, func(n dst.Node) bool {
 		if n == nil {
@@ -435,7 +299,7 @@ func ModifyFunctionBody(funcDecl *dst.FuncDecl, info FunctionInfo, pkgInfo PkgIn
 		if errArg == nil {
 			errArg = result
 			if useNilError {
-				errArg = dst.NewIdent(ei.ErrorName(pkgInfo, reason))
+				errArg = dst.NewIdent(errInformator.ErrorName(pkgInfo, reason))
 				reason = "unknown error in " + info.FunctionName
 			}
 		}
@@ -443,7 +307,7 @@ func ModifyFunctionBody(funcDecl *dst.FuncDecl, info FunctionInfo, pkgInfo PkgIn
 		constructorCall := &dst.CallExpr{
 			Fun: dst.NewIdent("New" + info.FunctionName + "Error"),
 			Args: append(
-				ArgumentNames(funcDecl, info.Args),
+				utils.ArgumentNames(funcDecl, info.Args),
 				dst.NewIdent("\""+reason+"\""),
 				errArg,
 			),
@@ -486,15 +350,6 @@ func IsNeedChange(expr dst.Expr) bool {
 	return false
 }
 
-func ArgumentNames(funcDecl *dst.FuncDecl, args []ArgInfo) []dst.Expr {
-	result := make([]dst.Expr, len(args))
-	for i, v := range args {
-		result[i] = dst.NewIdent(v.Name)
-	}
-
-	return result
-}
-
 func IsErrorWrapper(expr dst.Expr) dst.Expr {
 	if callExpr, ok := expr.(*dst.CallExpr); ok {
 		if ident, ok := callExpr.Fun.(*dst.Ident); ok {
@@ -507,106 +362,45 @@ func IsErrorWrapper(expr dst.Expr) dst.Expr {
 	return nil
 }
 
-func RemoveUnusedImports(node *dst.File) {
-	imports := make(map[string]*dst.ImportSpec)
-
-	for _, imp := range node.Imports {
-		if imp.Path != nil {
-			path := strings.Trim(imp.Path.Value, `"`)
-			imports[path] = imp
-		}
-	}
-	dst.Inspect(node, func(n dst.Node) bool {
-		if callExpr, ok := n.(*dst.CallExpr); ok {
-			n = callExpr.Fun
-		}
-		if sel, ok := n.(*dst.SelectorExpr); ok {
-			if ident, ok := sel.X.(*dst.Ident); ok {
-				for path, imp := range imports {
-					pkgName := ""
-					if imp.Name != nil {
-						pkgName = imp.Name.Name
-					} else {
-						pkgName = NameFromPath(path)
-					}
-					if ident.Name == pkgName {
-						delete(imports, path)
-					}
-				}
-			}
-		}
-
-		return true
-	})
-
-	for _, imp := range node.Decls {
-		if genDecl, ok := imp.(*dst.GenDecl); ok && genDecl.Tok == token.IMPORT {
-			var newImports []dst.Spec
-			for _, spec := range genDecl.Specs {
-				if importSpec, ok := spec.(*dst.ImportSpec); ok {
-					path := strings.Trim(importSpec.Path.Value, `"`)
-					if _, unused := imports[path]; !unused {
-						newImports = append(newImports, importSpec)
-					}
-				}
-			}
-			genDecl.Specs = newImports
-		}
-	}
-
-	// Мало ли у кого-то в нескольких импортах находится,
-	// поэтому снова в цикле проходим и пропускаем пустые
-	var newDecls []dst.Decl
-	for _, decl := range node.Decls {
-		if genDecl, ok := decl.(*dst.GenDecl); ok && genDecl.Tok == token.IMPORT {
-			if len(genDecl.Specs) > 0 {
-				newDecls = append(newDecls, decl)
-			}
-			continue
-		}
-		newDecls = append(newDecls, decl)
-	}
-
-	node.Decls = newDecls
-}
-
-// TODO: refactor
 func ExtractErrorMessage(expr dst.Expr) (string, bool, bool) {
 	callExpr, ok := expr.(*dst.CallExpr)
 	if !ok {
 		return "", false, false
 	}
-	if sel, ok := callExpr.Fun.(*dst.SelectorExpr); ok {
-		if ident, ok := sel.X.(*dst.Ident); ok {
-			if (ident.Name == "errors" && sel.Sel.Name == "New") || (ident.Name == "fmt" && (sel.Sel.Name == "Errorf")) {
-				if len(callExpr.Args) > 0 {
-					if lit, ok := callExpr.Args[0].(*dst.BasicLit); ok {
-						return strings.Trim(lit.Value, `"`), true, true
-					}
 
-					var buf bytes.Buffer
-					printer.Fprint(&buf, token.NewFileSet(), callExpr.Args[0])
-
-					return buf.String(), true, true
-				}
-			}
-
-			return ident.Name + "." + sel.Sel.Name, true, false
-		}
-
-		return sel.Sel.Name, true, false
-	} else if ident, ok := callExpr.Fun.(*dst.Ident); ok {
+	switch v := callExpr.Fun.(type) {
+	default:
+		return "", false, false
+	case *dst.Ident:
 		// Если уже была обертка, то забираем причину
-		if strings.HasSuffix(ident.Name, "Error") && len(callExpr.Args) > 1 {
+		if strings.HasSuffix(v.Name, "Error") && len(callExpr.Args) > 1 {
 			if lit, ok := callExpr.Args[len(callExpr.Args)-2].(*dst.BasicLit); ok {
 				return strings.Trim(lit.Value, `"`), true, false
 			}
 		}
 
-		return ident.Name, true, false
-	}
+		return v.Name, true, false
+	case *dst.SelectorExpr:
+		ident, ok := v.X.(*dst.Ident)
+		if !ok {
+			return v.Sel.Name, true, false
+		}
 
-	return "", false, false
+		if (ident.Name == "errors" && v.Sel.Name == "New") || (ident.Name == "fmt" && (v.Sel.Name == "Errorf")) {
+			if len(callExpr.Args) > 0 {
+				if lit, ok := callExpr.Args[0].(*dst.BasicLit); ok {
+					return strings.Trim(lit.Value, `"`), true, true
+				}
+
+				var buf bytes.Buffer
+				printer.Fprint(&buf, token.NewFileSet(), callExpr.Args[0])
+
+				return buf.String(), true, true
+			}
+		}
+
+		return ident.Name + "." + v.Sel.Name, true, false
+	}
 }
 
 func FindLastFunctionCall(node dst.Node, parentMap map[dst.Node]dst.Node) (string, bool, bool) {
@@ -621,32 +415,30 @@ func FindLastFunctionCall(node dst.Node, parentMap map[dst.Node]dst.Node) (strin
 			return "", false, true
 		case *dst.AssignStmt:
 			assignStmt = stmt
-		case *dst.IfStmt: // TODO: refactor
+		case *dst.IfStmt:
 			a, ok := stmt.Init.(*dst.AssignStmt)
-			if !ok {
-				p := parentMap[stmt]
-				b, ok := p.(*dst.BlockStmt)
-				if !ok {
-					parent = parentMap[parent]
-					continue
-				}
-				for i, v := range b.List {
-					if v == stmt {
-						if i == 0 {
-							break
-						}
-						if a, ok := b.List[i-1].(*dst.AssignStmt); ok {
-							assignStmt = a
-							break
-						}
-					}
-				}
-				if assignStmt == nil {
-					parent = parentMap[parent]
-					continue
-				}
-			} else {
+			if ok {
 				assignStmt = a
+				break // switch
+			}
+			p := parentMap[stmt]
+			b, ok := p.(*dst.BlockStmt)
+			if !ok {
+				parent = parentMap[parent]
+				continue
+			}
+			for i, v := range b.List[1:] {
+				if v != stmt {
+					continue
+				}
+				if a, ok := b.List[i].(*dst.AssignStmt); ok {
+					assignStmt = a
+					break
+				}
+			}
+			if assignStmt == nil {
+				parent = parentMap[parent]
+				continue
 			}
 		case *dst.BlockStmt:
 			assignStmt = BlockStmt(stmt)

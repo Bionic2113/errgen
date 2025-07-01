@@ -1,4 +1,4 @@
-package collectr
+package collector
 
 import (
 	"bytes"
@@ -11,7 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Bionic2113/errgen/internal/utils"
+	"github.com/Bionic2113/errgen/internal/generator"
+	"github.com/Bionic2113/errgen/pkg/utils"
 	"github.com/dave/dst"
 	"github.com/dave/dst/decorator"
 )
@@ -82,7 +83,7 @@ func (ec *ErrorCollector) CollectErrors(node *dst.File, pkgInfo utils.PkgInfo, c
 				continue
 			}
 
-			text, ok, _ := utils.ExtractErrorMessage(val.Values[0])
+			text, ok, _ := generator.ExtractErrorMessage(val.Values[0])
 			if !ok {
 				continue
 			}

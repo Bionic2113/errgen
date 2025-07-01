@@ -3,3 +3,8 @@ skip_types:
     all: false
     names:
       - "Config"
+stringer:
+  separator: "\\n"
+  connector: ": "
+  filename: "strings"
+  tagname: "errgen"

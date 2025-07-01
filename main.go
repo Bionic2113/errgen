@@ -2,10 +2,15 @@ package main
 
 import (
 	"github.com/Bionic2113/errgen/internal/prcs"
+	"github.com/Bionic2113/errgen/pkg/skipper"
+	"github.com/Bionic2113/errgen/pkg/stringer"
 )
 
 func main() {
-	processor, err := prcs.New()
+	stCfg := skipper.StringerConfig()
+	processor, err := prcs.New(
+		stringer.NewStringer(stCfg.FileName, stCfg.TagName, stCfg.Separator, stCfg.Connector),
+	)
 	if err != nil {
 		panic(err)
 	}

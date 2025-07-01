@@ -1,0 +1,31 @@
+package example
+
+import "fmt"
+
+func (o SomeStruct) String() string {
+	return fmt.Sprintf("Name: %s\nAge: %d", o.Name, o.Age)
+}
+
+func (o OtherUser) String() string {
+	return fmt.Sprintf("Compos: %#v\nName: %s\ntoken: %s\nPhone: %#v\nAge: %d", o.Compos, o.Name, o.token, o.Phone, o.Age)
+}
+
+func (o Phone) String() string {
+	return fmt.Sprintf("Type: %s\nNumber: %s\nskip: %s", o.Type, o.Number, o.imei)
+}
+
+func (o Igor) String() string {
+	return fmt.Sprintf("Compos: %#v\nName: %s\ntoken: %s\nPhone: %#v\nAge: %d", o.Compos, o.Name, o.token, o.Phone, o.Age)
+}
+
+func (o Compos) String() string {
+	return fmt.Sprintf("One: %d\nTwo: %d", o.One, o.Two)
+}
+
+func (o AnyCheck) String() string {
+	return fmt.Sprintf("MyyMap: %#v\nMyArr: %#v\nany: %#v\nInterface: %#v\nFoo: %#v", o.MyyMap, o.MyArr, o.any, o.Interface, o.Foo)
+}
+
+func (o User) String() string {
+	return fmt.Sprintf("Name: %s\nAge: %d", o.Name, o.Age)
+}
