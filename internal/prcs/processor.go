@@ -15,10 +15,13 @@ import (
 )
 
 type FileProcessor struct {
-	packages   map[utils.PkgInfo][]utils.FunctionInfo
-	currentDir string
-	collector  *collector.ErrorCollector
-	stringer   Stringer
+	packages          map[utils.PkgInfo][]utils.FunctionInfo
+	currentDir        string
+	collectorFilename string
+	wrapperFilename   string
+	collector         *collector.ErrorCollector
+	stringer          Stringer
+	skipper           Skipper
 }
 
 type Stringer interface {
@@ -26,22 +29,36 @@ type Stringer interface {
 	GenerateFiles() error
 }
 
-func New(st Stringer) (*FileProcessor, error) {
+type Skipper interface {
+	NeedSkipField(name, path string) bool
+	ModuleName(path string) string
+	NeedSkipFile(path string) bool
+}
+
+func New(
+	collectorFilename string,
+	wrapperFilename string,
+	st Stringer,
+	sk Skipper,
+) (*FileProcessor, error) {
 	currentDir, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
 
-	c, err := collector.New()
+	c, err := collector.New(collectorFilename)
 	if err != nil {
 		return nil, err
 	}
 
 	return &FileProcessor{
-		currentDir: currentDir,
-		packages:   make(map[utils.PkgInfo][]utils.FunctionInfo),
-		collector:  c,
-		stringer:   st,
+		currentDir:        currentDir,
+		collectorFilename: collectorFilename,
+		wrapperFilename:   wrapperFilename,
+		packages:          make(map[utils.PkgInfo][]utils.FunctionInfo),
+		collector:         c,
+		stringer:          st,
+		skipper:           sk,
 	}, nil
 }
 
@@ -54,13 +71,9 @@ func (p *FileProcessor) ProcessFiles() error {
 		// Пропускаем директории, тесты, файлы с ошибками и main.go
 		if info.IsDir() ||
 			!strings.HasSuffix(path, ".go") ||
-			strings.HasSuffix(path, "_test.go") ||
-			strings.HasSuffix(path, "_mock.go") ||
-			strings.HasSuffix(path, ".pb.go") ||
-			strings.HasSuffix(path, "errors.go") ||
-			strings.HasSuffix(path, "error_gen.go") ||
-			strings.Contains(path, "/vendor/") ||
-			strings.HasSuffix(path, "main.go") {
+			strings.HasSuffix(path, p.wrapperFilename+".go") ||
+			strings.HasSuffix(path, p.collectorFilename+".go") ||
+			p.skipper.NeedSkipFile(path) {
 			return nil
 		}
 
@@ -76,16 +89,16 @@ func (p *FileProcessor) ProcessFile(path string) error {
 	}
 
 	pkgInfo := utils.PkgInfo{Name: node.Name.Name, Path: filepath.Dir(path)}
-	// пропустим моки
-	if strings.HasSuffix(pkgInfo.Path, "mocks") {
-		return nil
-	}
 
 	p.stringer.MakeStringFuncs(pkgInfo, node.Scope)
 
 	subPkg := utils.SubPackageName(pkgInfo.Path, p.currentDir)
 	fileName := filepath.Base(path)
-	functions := generator.AnalyzeFunctions(node, pkgInfo, subPkg, p.currentDir, fileName, p.collector)
+	functions := generator.AnalyzeFunctions(
+		node, pkgInfo, subPkg,
+		p.currentDir, fileName, p.collector,
+		p.skipper,
+	)
 	if len(functions) > 0 {
 		p.packages[pkgInfo] = append(p.packages[pkgInfo], functions...)
 	}
@@ -103,6 +116,6 @@ func (p *FileProcessor) GenerateErrorFiles() {
 	}
 
 	for pkg, functions := range p.packages {
-		generator.GenerateErrorFile(pkg, functions)
+		generator.GenerateErrorFile(p.wrapperFilename, pkg, functions)
 	}
 }

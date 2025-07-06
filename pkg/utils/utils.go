@@ -9,15 +9,19 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/Bionic2113/errgen/pkg/skipper"
 	"github.com/dave/dst"
 	"github.com/dave/dst/decorator"
 )
 
 var (
-	versionMatch         *regexp.Regexp = regexp.MustCompile(`^(/?\w+(\.?|-?))+(/v\d+)$`)
+	versionMatch         *regexp.Regexp = regexp.MustCompile(`^(/?\w+(\.?|-?))+([./]v\d+)$`)
 	prefixAndSuffixMatch *regexp.Regexp = regexp.MustCompile(`(go-\w+)|(\w+-go)`)
 )
+
+type Skipper interface {
+	NeedSkipField(name, path string) bool
+	ModuleName(path string) string
+}
 
 func SubPackageName(pkgDir, baseDir string) string {
 	rel, err := filepath.Rel(baseDir, pkgDir)
@@ -31,6 +35,7 @@ func SubPackageName(pkgDir, baseDir string) string {
 
 	return rel
 }
+
 func CollectImports(node *dst.File) map[string]Path {
 	imports := make(map[string]Path)
 	for _, imp := range node.Imports {
@@ -49,6 +54,7 @@ func CollectImports(node *dst.File) map[string]Path {
 
 	return imports
 }
+
 func NameFromPath(path string) string {
 	// Удаляем версии пакетов, если есть
 	matches := versionMatch.FindStringSubmatch(path)
@@ -71,8 +77,14 @@ func NameFromPath(path string) string {
 	return strings.TrimPrefix(name, "go-")
 }
 
-func CreateFunctionInfo(funcDecl *dst.FuncDecl, pkgInfo PkgInfo, subPkg string, imports map[string]Path) FunctionInfo {
-	args := ExtractArgs(funcDecl, pkgInfo.Path, imports)
+func CreateFunctionInfo(
+	funcDecl *dst.FuncDecl,
+	pkgInfo PkgInfo,
+	subPkg string,
+	imports map[string]Path,
+	skipper Skipper,
+) FunctionInfo {
+	args := ExtractArgs(funcDecl, pkgInfo.Path, imports, skipper)
 	receiverType := ExtractReceiverType(funcDecl)
 
 	return FunctionInfo{PackageName: pkgInfo.Name, SubPackageName: subPkg, FunctionName: funcDecl.Name.Name, ReceiverType: receiverType, Args: args, Imports: imports, HasError: true}
@@ -104,7 +116,13 @@ func WriteModifiedFile(node *dst.File, path string) {
 		fmt.Printf("Error writing modified file: %v\n", err)
 	}
 }
-func ExtractArgs(funcDecl *dst.FuncDecl, path string, imports map[string]Path) []ArgInfo {
+
+func ExtractArgs(
+	funcDecl *dst.FuncDecl,
+	path string,
+	imports map[string]Path,
+	skipper Skipper,
+) []ArgInfo {
 	var args []ArgInfo
 	if funcDecl.Type.Params == nil {
 		return args
@@ -126,7 +144,7 @@ func ExtractArgs(funcDecl *dst.FuncDecl, path string, imports map[string]Path) [
 		var isSelector bool
 		if v, ok := expr.(*dst.SelectorExpr); ok {
 			pkg := v.X.(*dst.Ident).Name
-			if skipper.NeedSkip(v.Sel.Name, imports[pkg].Path) {
+			if skipper.NeedSkipField(v.Sel.Name, imports[pkg].Path) {
 				continue
 			}
 			typeStr += pkg + "."
@@ -135,7 +153,7 @@ func ExtractArgs(funcDecl *dst.FuncDecl, path string, imports map[string]Path) [
 		}
 
 		if v, ok := expr.(*dst.Ident); ok {
-			if !isSelector && skipper.NeedSkip(v.Name, skipper.ModuleName(path)) {
+			if !isSelector && skipper.NeedSkipField(v.Name, skipper.ModuleName(path)) {
 				continue
 			}
 			typeStr += v.Name
@@ -281,33 +299,20 @@ func FieldName(field *dst.Field) string {
 		return field.Names[0].Name
 	}
 
-	ident := func(i *dst.Ident) string {
-		return i.Name
-	}
+	return fieldName(field.Type)
+}
 
-	selector := func(s *dst.SelectorExpr) string {
-		return ident(s.Sel)
-	}
-
-	star := func(s *dst.StarExpr) string {
-		switch t := s.X.(type) {
-		default:
-			panic(fmt.Sprintf("Cann't process StarExpr type: %#v", t))
-		case *dst.Ident:
-			return ident(t)
-		case *dst.SelectorExpr:
-			return selector(t)
-		}
-	}
-
-	switch t := field.Type.(type) {
+func fieldName(exp dst.Expr) string {
+	switch t := exp.(type) {
 	default:
 		panic(fmt.Sprintf("Cann't process Field type: %#v", t))
 	case *dst.Ident:
-		return ident(t)
+		return t.Name
 	case *dst.SelectorExpr:
-		return selector(t)
+		return t.Sel.Name
 	case *dst.StarExpr:
-		return star(t)
+		return fieldName(t.X)
+	case *dst.IndexListExpr:
+		return fieldName(t.X)
 	}
 }

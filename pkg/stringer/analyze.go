@@ -57,7 +57,12 @@ func (s *Stringer) MakeStringFuncs(pkgInfo utils.PkgInfo, scope *dst.Scope) {
 				break
 			}
 
-			structInfo, ok := s.makeStringFunc(k, t.Obj.Decl.(*dst.TypeSpec).Type.(*dst.StructType))
+			st, ok := t.Obj.Decl.(*dst.TypeSpec).Type.(*dst.StructType)
+			if !ok {
+				continue
+			}
+
+			structInfo, ok := s.makeStringFunc(k, st)
 			if ok {
 				s.structsInfo[pkgInfo] = append(s.structsInfo[pkgInfo], structInfo)
 			}

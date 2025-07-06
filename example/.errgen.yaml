@@ -1,8 +1,15 @@
-skip_types:
-  "github.com/Bionic2113/errgen/pkg/skipper":
-    all: false
-    names:
-      - "Config"
+wrapper_filename: "errwrap_gen"
+simple_err_filename: "error_gen"
+skipper:
+  skip_types:
+    "github.com/Bionic2113/errgen/pkg/skipper":
+      all: false
+      names:
+        - "Config"
+  with_default: true
+  rules:
+    - type: suffix
+      value: "skip.go"
 stringer:
   separator: "\\n"
   connector: ": "
