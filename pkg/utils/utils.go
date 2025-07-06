@@ -275,3 +275,39 @@ func RemoveUnusedImports(node *dst.File) {
 
 	node.Decls = newDecls
 }
+
+func FieldName(field *dst.Field) string {
+	if len(field.Names) != 0 {
+		return field.Names[0].Name
+	}
+
+	ident := func(i *dst.Ident) string {
+		return i.Name
+	}
+
+	selector := func(s *dst.SelectorExpr) string {
+		return ident(s.Sel)
+	}
+
+	star := func(s *dst.StarExpr) string {
+		switch t := s.X.(type) {
+		default:
+			panic(fmt.Sprintf("Cann't process StarExpr type: %#v", t))
+		case *dst.Ident:
+			return ident(t)
+		case *dst.SelectorExpr:
+			return selector(t)
+		}
+	}
+
+	switch t := field.Type.(type) {
+	default:
+		panic(fmt.Sprintf("Cann't process Field type: %#v", t))
+	case *dst.Ident:
+		return ident(t)
+	case *dst.SelectorExpr:
+		return selector(t)
+	case *dst.StarExpr:
+		return star(t)
+	}
+}

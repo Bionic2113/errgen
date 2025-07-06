@@ -46,12 +46,6 @@ func (s *Stringer) MakeStringFuncs(pkgInfo utils.PkgInfo, scope *dst.Scope) {
 		}
 
 		switch t := ts.Type.(type) {
-		default:
-			break // TODO:(bionic2113): для кастомных мап и тп некорректно сработает заполнение. Да и нужно ли
-			// s.structsInfo[pkgInfo] = append(
-			// 	s.structsInfo[pkgInfo],
-			// 	StructInfo{Name: k, Fields: []*FieldInfo{{FactName: v.Name, Type: "any"}}},
-			// )
 		case *dst.StructType:
 			structInfo, ok := s.makeStringFunc(k, t)
 			if ok {
@@ -60,13 +54,9 @@ func (s *Stringer) MakeStringFuncs(pkgInfo utils.PkgInfo, scope *dst.Scope) {
 		case *dst.Ident:
 			// it is basic type
 			if t.Obj == nil {
-				break // TODO:(bionic2113): для кастомных базовых типов неккоректно сработает заполнение. Да и нужно ли
-				// s.structsInfo[pkgInfo] = append(
-				// 	s.structsInfo[pkgInfo],
-				// 	StructInfo{Name: k, Fields: []*FieldInfo{{FactName: v.Name, Type: t.Name}}},
-				// )
-				// break
+				break
 			}
+
 			structInfo, ok := s.makeStringFunc(k, t.Obj.Decl.(*dst.TypeSpec).Type.(*dst.StructType))
 			if ok {
 				s.structsInfo[pkgInfo] = append(s.structsInfo[pkgInfo], structInfo)
@@ -84,6 +74,7 @@ func (s *Stringer) makeStringFunc(name string, st *dst.StructType) (StructInfo, 
 		}
 
 		fieldInfo := &FieldInfo{
+			FactName:   utils.FieldName(field),
 			CustomName: tag,
 			Type:       "any", // that easier than real type for not basic type
 		}
@@ -92,18 +83,11 @@ func (s *Stringer) makeStringFunc(name string, st *dst.StructType) (StructInfo, 
 
 		ident, ok := field.Type.(*dst.Ident)
 		if !ok {
-			fieldInfo.FactName = field.Names[0].Name
 			continue
 		}
 
 		if utils.IsBasicType(ident.Name) {
 			fieldInfo.Type = ident.Name
-		}
-
-		// Composition doesn't have names
-		fieldInfo.FactName = ident.Name
-		if len(field.Names) != 0 {
-			fieldInfo.FactName = field.Names[0].Name
 		}
 	}
 

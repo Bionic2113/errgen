@@ -59,6 +59,7 @@ func (p *FileProcessor) ProcessFiles() error {
 			strings.HasSuffix(path, ".pb.go") ||
 			strings.HasSuffix(path, "errors.go") ||
 			strings.HasSuffix(path, "error_gen.go") ||
+			strings.Contains(path, "/vendor/") ||
 			strings.HasSuffix(path, "main.go") {
 			return nil
 		}
