@@ -133,7 +133,14 @@ func ErrorReturnIndex(funcNode dst.Node) int {
 				return totalIndex
 			}
 		}
-		totalIndex++
+
+		// for someFoo() (arg1, arg2 int, err error)
+		add := len(field.Names)
+		if add == 0 {
+			add = 1
+		}
+
+		totalIndex += add
 	}
 	return -1
 }
